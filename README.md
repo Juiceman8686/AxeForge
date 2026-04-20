@@ -30,7 +30,7 @@ AxeForge monitors your Bitaxe miners in real time and intelligently tunes freque
 ```yaml
 services:
   axeforge:
-    image: ghcr.io/YOUR_GITHUB_USERNAME/axeforge:latest
+    image: ghcr.io/Juiceman8686/axeforge:latest
     container_name: axeforge
     ports:
       - "8080:8080"

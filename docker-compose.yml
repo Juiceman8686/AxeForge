@@ -1,0 +1,9 @@
+services:
+  axeforge:
+    image: ghcr.io/YOUR_GITHUB_USERNAME/axeforge:latest
+    container_name: axeforge
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

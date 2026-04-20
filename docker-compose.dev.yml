@@ -1,0 +1,9 @@
+services:
+  axeforge:
+    build: .
+    container_name: axeforge-dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

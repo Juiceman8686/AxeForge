@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AxeForge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Exo+2:wght@300;400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ── Variables ──────────────────────────────────────────────────────── */
+:root{
+  --bg:#090909;--surface:#0f0f0f;--card:#161616;--card-h:#1c1c1c;
+  --border:#232323;--border-b:#2e2e2e;
+  --accent:#f97316;--accent-d:#7c3d12;--accent-g:rgba(249,115,22,.14);
+  --txt:#f0f0f0;--txt2:#8a8a8a;--txt3:#444;
+  --ok:#22c55e;--warn:#eab308;--err:#ef4444;--info:#3b82f6;
+  --radius:10px;--radius-sm:6px;
+  --font-ui:'Exo 2',sans-serif;--font-mono:'Share Tech Mono',monospace;
+  --font-brand:'Orbitron',sans-serif;
+  --shadow:0 4px 24px rgba(0,0,0,.5);
+}
+[data-theme="light"]{
+  --bg:#f2efe9;--surface:#ffffff;--card:#fafaf7;--card-h:#f4f2ed;
+  --border:#ddd9d0;--border-b:#ccc8bf;
+  --accent:#ea580c;--accent-d:#fed7aa;--accent-g:rgba(234,88,12,.1);
+  --txt:#171717;--txt2:#666;--txt3:#bbb;
+  --shadow:0 4px 24px rgba(0,0,0,.1);
+}
+
+/* ── Reset & base ───────────────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--txt);font-family:var(--font-ui);
+  font-size:14px;line-height:1.5;min-height:100vh;transition:background .25s,color .25s;}
+button{cursor:pointer;font-family:var(--font-ui);}
+input,select{font-family:var(--font-ui);}
+a{color:var(--accent);text-decoration:none;}
+
+/* subtle grain on dark */
+body::before{content:'';position:fixed;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:0;opacity:.4;}
+[data-theme="light"] body::before{opacity:.15;}
+
+/* ── Navbar ─────────────────────────────────────────────────────────── */
+#navbar{position:sticky;top:0;z-index:100;
+  background:rgba(9,9,9,.92);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:16px;padding:0 20px;height:56px;}
+[data-theme="light"] #navbar{background:rgba(242,239,233,.92);}
+
+.brand{font-family:var(--font-brand);font-size:18px;
+  background:linear-gradient(135deg,#f97316,#fb923c);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  letter-spacing:.06em;white-space:nowrap;display:flex;align-items:center;gap:8px;}
+.brand svg{flex-shrink:0;}
+
+.nav-tabs{display:flex;gap:2px;margin-left:8px;}
+.nav-tab{background:none;border:none;color:var(--txt2);font-size:13px;
+  font-weight:500;padding:6px 14px;border-radius:var(--radius-sm);
+  transition:all .15s;letter-spacing:.02em;}
+.nav-tab:hover{color:var(--txt);background:var(--card);}
+.nav-tab.active{color:var(--accent);background:var(--accent-g);}
+
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:8px;}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;
+  border-radius:var(--radius-sm);border:none;font-size:13px;font-weight:500;
+  transition:all .15s;white-space:nowrap;}
+.btn-primary{background:var(--accent);color:#fff;}
+.btn-primary:hover{background:#ea580c;transform:translateY(-1px);}
+.btn-ghost{background:transparent;color:var(--txt2);border:1px solid var(--border);}
+.btn-ghost:hover{color:var(--txt);border-color:var(--border-b);background:var(--card);}
+.btn-danger{background:var(--err);color:#fff;}
+.btn-danger:hover{background:#dc2626;}
+.btn-sm{padding:4px 10px;font-size:12px;}
+.btn-icon{padding:6px;border-radius:var(--radius-sm);background:none;border:1px solid var(--border);color:var(--txt2);}
+.btn-icon:hover{color:var(--txt);border-color:var(--border-b);}
+#stopAllBtn{display:none;}
+#stopAllBtn.visible{display:inline-flex;}
+
+/* ── Layout ─────────────────────────────────────────────────────────── */
+main{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:24px 20px;}
+.view{display:none;}
+.view.active{display:block;}
+
+/* ── Onboarding ─────────────────────────────────────────────────────── */
+#onboarding{display:flex;align-items:center;justify-content:center;min-height:70vh;}
+.onboard-card{background:var(--card);border:1px solid var(--border);border-radius:16px;
+  padding:60px 48px;text-align:center;max-width:480px;width:100%;}
+.onboard-icon{font-size:64px;margin-bottom:16px;display:block;}
+.onboard-card h1{font-family:var(--font-brand);font-size:28px;
+  background:linear-gradient(135deg,#f97316,#fb923c);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px;}
+.onboard-card p{color:var(--txt2);margin-bottom:28px;font-size:15px;}
+
+/* ── Global stats bar ───────────────────────────────────────────────── */
+#global-bar{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+.stat-chip{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:8px 16px;display:flex;flex-direction:column;gap:2px;}
+.stat-chip .label{font-size:11px;color:var(--txt2);text-transform:uppercase;letter-spacing:.08em;}
+.stat-chip .value{font-family:var(--font-mono);font-size:16px;font-weight:600;color:var(--txt);}
+.stat-chip .value.accent{color:var(--accent);}
+
+/* ── Miners grid ────────────────────────────────────────────────────── */
+#miners-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px;}
+
+/* ── Miner card ─────────────────────────────────────────────────────── */
+.miner-card{background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);overflow:hidden;transition:border-color .3s,box-shadow .3s;}
+.miner-card.tuning-active{border-color:var(--accent);
+  box-shadow:0 0 20px rgba(249,115,22,.18);}
+.miner-card.offline{opacity:.6;}
+
+.card-header{display:flex;align-items:center;gap:10px;padding:14px 16px;
+  border-bottom:1px solid var(--border);}
+.status-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.status-dot.online{background:var(--ok);box-shadow:0 0 6px var(--ok);}
+.status-dot.offline{background:var(--err);}
+.status-dot.restarting{background:var(--warn);animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.miner-name{font-weight:600;font-size:14px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.miner-ip{font-family:var(--font-mono);font-size:11px;color:var(--txt2);}
+.card-header-actions{display:flex;gap:4px;margin-left:auto;}
+
+.card-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
+  background:var(--border);border-bottom:1px solid var(--border);}
+.metric-cell{background:var(--card);padding:12px 10px;text-align:center;}
+.metric-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt2);margin-bottom:4px;}
+.metric-value{font-family:var(--font-mono);font-size:20px;font-weight:700;line-height:1;}
+.metric-unit{font-size:10px;color:var(--txt2);margin-top:2px;}
+.metric-bar{height:3px;background:var(--border);border-radius:2px;margin-top:6px;overflow:hidden;}
+.metric-fill{height:100%;border-radius:2px;transition:width .5s ease;}
+
+.card-details{display:grid;grid-template-columns:repeat(3,1fr);gap:0;padding:10px 14px;
+  border-bottom:1px solid var(--border);}
+.detail-item{display:flex;flex-direction:column;gap:2px;padding:2px 0;}
+.detail-label{font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.07em;}
+.detail-value{font-family:var(--font-mono);font-size:13px;color:var(--txt);}
+
+.card-tuning{padding:10px 14px;min-height:38px;border-bottom:1px solid var(--border);}
+.tuning-status{display:flex;align-items:center;gap:8px;font-size:12px;}
+.tuning-badge{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.07em;}
+.badge-idle{background:var(--border);color:var(--txt2);}
+.badge-running{background:var(--accent-g);color:var(--accent);animation:badgePulse 2s infinite;}
+.badge-complete{background:rgba(34,197,94,.15);color:var(--ok);}
+.badge-error{background:rgba(239,68,68,.15);color:var(--err);}
+.badge-restarting{background:rgba(234,179,8,.15);color:var(--warn);}
+@keyframes badgePulse{0%,100%{opacity:1;}50%{opacity:.6;}}
+
+.card-actions{padding:10px 14px;display:flex;gap:8px;align-items:center;}
+.best-label{font-size:11px;color:var(--txt2);margin-left:auto;font-family:var(--font-mono);}
+
+/* ── Modal backdrop ─────────────────────────────────────────────────── */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);
+  backdrop-filter:blur(4px);z-index:200;display:none;
+  align-items:center;justify-content:center;padding:16px;}
+.modal-backdrop.open{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border-b);
+  border-radius:14px;width:100%;max-width:520px;max-height:90vh;
+  overflow-y:auto;box-shadow:var(--shadow);}
+.modal-header{display:flex;align-items:center;justify-content:space-between;
+  padding:20px 24px;border-bottom:1px solid var(--border);}
+.modal-title{font-family:var(--font-brand);font-size:16px;letter-spacing:.04em;color:var(--accent);}
+.modal-close{background:none;border:none;color:var(--txt2);font-size:20px;
+  padding:0 4px;line-height:1;cursor:pointer;}
+.modal-close:hover{color:var(--txt);}
+.modal-body{padding:20px 24px;}
+.modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;}
+
+/* ── Form elements ──────────────────────────────────────────────────── */
+.form-group{margin-bottom:16px;}
+.form-label{display:block;font-size:12px;color:var(--txt2);
+  text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;}
+.form-input{width:100%;background:var(--card);border:1px solid var(--border);
+  color:var(--txt);border-radius:var(--radius-sm);padding:9px 12px;font-size:14px;
+  transition:border-color .15s;}
+.form-input:focus{outline:none;border-color:var(--accent);}
+.form-input:invalid{border-color:var(--err);}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.form-hint{font-size:11px;color:var(--txt2);margin-top:4px;}
+.form-hint.warn{color:var(--warn);}
+
+/* Priority sorter */
+.priority-list{display:flex;flex-direction:column;gap:6px;}
+.priority-item{display:flex;align-items:center;gap:10px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:8px 12px;}
+.priority-num{font-family:var(--font-mono);font-size:12px;color:var(--accent);width:16px;}
+.priority-name{flex:1;font-size:13px;}
+.priority-btns{display:flex;gap:2px;}
+
+/* Tabs inside modal */
+.tab-group{display:flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:16px;}
+.tab-opt{flex:1;background:none;border:none;padding:8px;font-size:12px;
+  font-weight:500;color:var(--txt2);transition:all .15s;}
+.tab-opt.active{background:var(--accent);color:#fff;}
+
+/* ── History view ───────────────────────────────────────────────────── */
+.history-layout{display:grid;grid-template-columns:320px 1fr;gap:20px;}
+@media(max-width:900px){.history-layout{grid-template-columns:1fr;}}
+.sessions-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);}
+.panel-header{padding:14px 16px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;}
+.panel-title{font-size:13px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--txt2);}
+.session-item{padding:12px 16px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .12s;display:flex;align-items:flex-start;gap:10px;}
+.session-item:hover{background:var(--card-h);}
+.session-item.selected{background:var(--accent-g);border-left:3px solid var(--accent);}
+.session-check{margin-top:2px;}
+.session-info{flex:1;min-width:0;}
+.session-name{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.session-meta{font-size:11px;color:var(--txt2);}
+.session-delete{padding:2px;background:none;border:none;color:var(--txt3);font-size:14px;
+  cursor:pointer;flex-shrink:0;}
+.session-delete:hover{color:var(--err);}
+.no-sessions{padding:32px;text-align:center;color:var(--txt2);font-size:13px;}
+
+.chart-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+.chart-controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+.metric-toggle{display:flex;align-items:center;gap:6px;padding:4px 10px;
+  border-radius:20px;border:1px solid var(--border);background:none;
+  font-size:12px;cursor:pointer;transition:all .15s;}
+.metric-toggle.active{border-color:var(--accent);background:var(--accent-g);color:var(--txt);}
+.chart-wrap{position:relative;height:340px;}
+.no-selection{display:flex;align-items:center;justify-content:center;
+  height:340px;color:var(--txt2);font-size:14px;}
+
+/* Summary card */
+.summary-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:20px;margin-top:16px;}
+.summary-title{font-size:12px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--txt2);margin-bottom:12px;}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;}
+.summary-item{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:10px;}
+.summary-item .s-label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--txt2);}
+.summary-item .s-value{font-family:var(--font-mono);font-size:16px;font-weight:700;
+  margin-top:2px;color:var(--txt);}
+.summary-why{margin-top:12px;padding:10px 14px;background:var(--accent-g);
+  border:1px solid var(--accent-d);border-radius:var(--radius-sm);
+  font-size:12px;color:var(--txt);}
+
+/* ── Settings view ──────────────────────────────────────────────────── */
+.settings-layout{max-width:600px;}
+.settings-section{background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);margin-bottom:20px;overflow:hidden;}
+.settings-header{padding:14px 20px;border-bottom:1px solid var(--border);
+  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--txt2);}
+.settings-body{padding:20px;}
+.settings-row{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--border);}
+.settings-row:last-child{border-bottom:none;}
+.settings-key{font-size:13px;}
+.settings-desc{font-size:11px;color:var(--txt2);}
+.settings-control{flex-shrink:0;margin-left:16px;}
+.hard-limit{font-size:11px;color:var(--warn);margin-top:4px;}
+
+/* Version */
+.version-badge{display:inline-block;font-family:var(--font-mono);font-size:11px;
+  padding:2px 8px;background:var(--border);border-radius:20px;color:var(--txt2);}
+
+/* ── Toast ──────────────────────────────────────────────────────────── */
+#toast-container{position:fixed;bottom:20px;right:20px;z-index:500;display:flex;flex-direction:column;gap:8px;}
+.toast{padding:10px 16px;border-radius:var(--radius-sm);font-size:13px;
+  box-shadow:var(--shadow);animation:toastIn .2s ease;max-width:320px;}
+.toast-ok{background:var(--ok);color:#fff;}
+.toast-err{background:var(--err);color:#fff;}
+.toast-info{background:var(--card);color:var(--txt);border:1px solid var(--border);}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:none;}}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border-b);border-radius:3px;}
+</style>
+</head>
+<body>
+
+<!-- ── Navbar ──────────────────────────────────────────────────────────── -->
+<nav id="navbar">
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:#f97316">
+      <path d="M14.5 10.5 10 15l-4-4 5-5 3.5 3.5z"/><path d="m16 8-1.5 1.5"/><path d="M20 4 10 14"/><path d="m4 20 4-4"/>
+    </svg>
+    AxeForge
+  </div>
+
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="showView('dashboard')">Dashboard</button>
+    <button class="nav-tab" onclick="showView('history')">History</button>
+    <button class="nav-tab" onclick="showView('settings')">Settings</button>
+  </div>
+
+  <div class="nav-right">
+    <button id="stopAllBtn" class="btn btn-danger btn-sm" onclick="stopAllTuning()">⏹ Stop All</button>
+    <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme">
+      <span id="themeIcon">☀️</span>
+    </button>
+    <button class="btn btn-primary btn-sm" onclick="openAddMinerModal()">+ Add Miner</button>
+  </div>
+</nav>
+
+<!-- ── Main ────────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Dashboard -->
+  <div id="view-dashboard" class="view active">
+    <div id="onboarding">
+      <div class="onboard-card">
+        <span class="onboard-icon">⚒️</span>
+        <h1>AxeForge</h1>
+        <p>Auto-tune your Bitaxe miners for maximum performance.<br/>Add your first miner to get started.</p>
+        <button class="btn btn-primary" onclick="openAddMinerModal()">+ Add Your First Miner</button>
+      </div>
+    </div>
+    <div id="dashboard-content" style="display:none">
+      <div id="global-bar"></div>
+      <div id="miners-grid"></div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div id="view-history" class="view">
+    <div class="history-layout">
+      <div class="sessions-panel">
+        <div class="panel-header">
+          <span class="panel-title">Sessions</span>
+          <select id="historyMinerFilter" class="form-input" style="width:auto;font-size:12px;padding:4px 8px;" onchange="loadSessions()">
+            <option value="">All Miners</option>
+          </select>
+        </div>
+        <div id="sessions-list"></div>
+      </div>
+      <div>
+        <div class="chart-panel">
+          <div class="chart-controls">
+            <button class="metric-toggle active" data-metric="hashrate" onclick="toggleMetric(this)">📈 Hashrate</button>
+            <button class="metric-toggle active" data-metric="temp" onclick="toggleMetric(this)">🌡 Temperature</button>
+            <button class="metric-toggle active" data-metric="error_rate" onclick="toggleMetric(this)">⚠️ Error Rate</button>
+          </div>
+          <div class="chart-wrap">
+            <div class="no-selection" id="chartPlaceholder">Select one or more sessions to compare</div>
+            <canvas id="historyChart" style="display:none"></canvas>
+          </div>
+        </div>
+        <div id="session-summaries"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div id="view-settings" class="view">
+    <div class="settings-layout">
+      <div class="settings-section">
+        <div class="settings-header">Default Tuning Limits</div>
+        <div class="settings-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Max Temperature (°C)</label>
+              <input id="s_max_temp" type="number" class="form-input" min="40" max="80" step="1"/>
+              <div class="hard-limit">Hard ceiling: 80°C</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max Voltage (mV)</label>
+              <input id="s_max_voltage" type="number" class="form-input" min="1100" max="1400" step="10"/>
+              <div class="hard-limit">Hard ceiling: 1400 mV</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Error Rate Threshold (%)</label>
+            <input id="s_error_rate" type="number" class="form-input" min="0.1" max="10" step="0.1"/>
+            <div class="form-hint">Tuner backs off when error rate exceeds this value.</div>
+          </div>
+          <button class="btn btn-primary" onclick="saveSettings()">Save Defaults</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-header">Appearance</div>
+        <div class="settings-body">
+          <div class="settings-row">
+            <div>
+              <div class="settings-key">Theme</div>
+              <div class="settings-desc">Switch between dark and light mode</div>
+            </div>
+            <div class="settings-control">
+              <button class="btn btn-ghost btn-sm" onclick="toggleTheme()">Toggle Theme</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-header">About</div>
+        <div class="settings-body">
+          <p style="color:var(--txt2);font-size:13px;margin-bottom:8px;">
+            AxeForge — Open-source Bitaxe auto-tuner.<br/>
+            Tune smarter. Mine harder.
+          </p>
+          <span class="version-badge">v1.0.0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Add Miner Modal ──────────────────────────────────────────────────── -->
+<div id="addMinerModal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Add Miner</span>
+      <button class="modal-close" onclick="closeModal('addMinerModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">IP Address *</label>
+        <input id="am_ip" type="text" class="form-input" placeholder="192.168.1.100" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nickname (optional)</label>
+        <input id="am_nick" type="text" class="form-input" placeholder="Auto-populated from AxeOS"/>
+        <div class="form-hint">Leave blank to use the name set in AxeOS.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('addMinerModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addMiner()">Add Miner</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit Miner Modal ─────────────────────────────────────────────────── -->
+<div id="editMinerModal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Edit Miner</span>
+      <button class="modal-close" onclick="closeModal('editMinerModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input id="em_id" type="hidden"/>
+      <div class="form-group">
+        <label class="form-label">Nickname</label>
+        <input id="em_nick" type="text" class="form-input"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('editMinerModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNickname()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Start Tuning Modal ───────────────────────────────────────────────── -->
+<div id="tuneModal" class="modal-backdrop">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title">Start Tuning — <span id="tm_name"></span></span>
+      <button class="modal-close" onclick="closeModal('tuneModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input id="tm_id" type="hidden"/>
+
+      <!-- Priority -->
+      <div class="form-group">
+        <label class="form-label">Priority Order</label>
+        <div class="priority-list" id="priorityList">
+          <div class="priority-item" data-key="hashrate">
+            <span class="priority-num">①</span>
+            <span class="priority-name">📈 Hashrate</span>
+            <div class="priority-btns">
+              <button class="btn-icon btn-sm" onclick="movePriority(this,-1)">▲</button>
+              <button class="btn-icon btn-sm" onclick="movePriority(this,1)">▼</button>
+            </div>
+          </div>
+          <div class="priority-item" data-key="temp">
+            <span class="priority-num">②</span>
+            <span class="priority-name">🌡 Temperature</span>
+            <div class="priority-btns">
+              <button class="btn-icon btn-sm" onclick="movePriority(this,-1)">▲</button>
+              <button class="btn-icon btn-sm" onclick="movePriority(this,1)">▼</button>
+            </div>
+          </div>
+          <div class="priority-item" data-key="error_rate">
+            <span class="priority-num">③</span>
+            <span class="priority-name">⚠️ Error Rate</span>
+            <div class="priority-btns">
+              <button class="btn-icon btn-sm" onclick="movePriority(this,-1)">▲</button>
+              <button class="btn-icon btn-sm" onclick="movePriority(this,1)">▼</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step mode -->
+      <div class="form-group">
+        <label class="form-label">Step Mode</label>
+        <div class="tab-group">
+          <button class="tab-opt" id="sm_fast" onclick="setStepMode('fast')">⚡ Fast</button>
+          <button class="tab-opt active" id="sm_slow" onclick="setStepMode('slow')">🐢 Slow (Recommended)</button>
+        </div>
+        <div class="form-hint">Fast: 25 MHz / 50 mV steps. Slow: 25 MHz / 25 mV steps. Fast mode auto-switches to Slow near limits.</div>
+      </div>
+
+      <!-- Time limit -->
+      <div class="form-group">
+        <label class="form-label">Time Limit</label>
+        <div class="tab-group">
+          <button class="tab-opt active" id="tl_none" onclick="setTimeLimit(null)">♾ No Limit</button>
+          <button class="tab-opt" id="tl_custom" onclick="setTimeLimit('custom')">⏱ Minutes</button>
+        </div>
+        <div id="tl_input" style="display:none;margin-top:8px;">
+          <input id="tm_minutes" type="number" class="form-input" placeholder="e.g. 60" min="5" step="5"/>
+        </div>
+      </div>
+
+      <!-- Baseline -->
+      <div class="form-group">
+        <label class="form-label">Starting Baseline</label>
+        <div class="tab-group">
+          <button class="tab-opt active" id="bl_stock" onclick="setBaseline('stock')">📦 Stock</button>
+          <button class="tab-opt" id="bl_custom" onclick="setBaseline('custom')">✏️ Custom</button>
+        </div>
+        <div id="bl_custom_inputs" style="display:none;margin-top:8px;">
+          <div class="form-row">
+            <div>
+              <label class="form-label">Frequency (MHz)</label>
+              <input id="tm_freq" type="number" class="form-input" placeholder="525" min="400" max="625" step="25"/>
+            </div>
+            <div>
+              <label class="form-label">Voltage (mV)</label>
+              <input id="tm_volt" type="number" class="form-input" placeholder="1150" min="1100" max="1400" step="10"/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Safety -->
+      <div class="form-group">
+        <label class="form-label">Safety Limits for This Session</label>
+        <div class="form-row">
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Max Temp (°C)</label>
+            <input id="tm_max_temp" type="number" class="form-input" min="40" max="80" step="1"/>
+            <div class="hard-limit">Hard ceiling: 80°C</div>
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Max Voltage (mV)</label>
+            <input id="tm_max_volt" type="number" class="form-input" min="1100" max="1400" step="10"/>
+            <div class="hard-limit">Hard ceiling: 1400 mV</div>
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <label class="form-label" style="margin-bottom:4px">Error Rate Threshold (%)</label>
+          <input id="tm_err_thresh" type="number" class="form-input" min="0.1" max="10" step="0.1"/>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('tuneModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitTuning()">▶ Start Tuning</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast container ─────────────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let miners        = [];
+let settings      = {};
+let selectedSessions = new Set();
+let visibleMetrics   = new Set(['hashrate','temp','error_rate']);
+let historyChart  = null;
+let stepMode      = 'slow';
+let timeLimitMode = null;   // null = no limit, 'custom' = user input
+let baselineMode  = 'stock';
+
+// Session colour palette (for chart overlay)
+const SESSION_COLORS = [
+  '#f97316','#3b82f6','#22c55e','#a855f7',
+  '#ec4899','#14b8a6','#eab308','#ef4444',
+];
+
+// ── WebSocket ──────────────────────────────────────────────────────────────
+let ws, wsRetry = 0;
+function connectWS(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if(msg.type === 'miners_update') handleMinersUpdate(msg.data);
+  };
+  ws.onclose = () => {
+    wsRetry = Math.min(wsRetry + 1, 5);
+    setTimeout(connectWS, wsRetry * 1500);
+  };
+  ws.onopen = () => { wsRetry = 0; };
+}
+connectWS();
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+(async function init(){
+  settings = await api('GET','/api/settings');
+  applyTheme(settings.theme || 'dark');
+  loadSettingsForm();
+  await fetchAndRenderMiners();
+  loadSessions();
+  loadHistoryFilter();
+})();
+
+// ── API helpers ────────────────────────────────────────────────────────────
+async function api(method, url, body){
+  const opts = {method, headers:{'Content-Type':'application/json'}};
+  if(body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if(!r.ok){
+    const t = await r.text();
+    throw new Error(t || r.statusText);
+  }
+  return r.json();
+}
+
+// ── Real-time update ───────────────────────────────────────────────────────
+function handleMinersUpdate(data){
+  miners = data;
+  if(!document.getElementById('view-dashboard').classList.contains('active')) return;
+  renderDashboard();
+}
+
+// ── View switching ─────────────────────────────────────────────────────────
+function showView(name){
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+  const tabs = document.querySelectorAll('.nav-tab');
+  tabs.forEach(t => { if(t.textContent.toLowerCase().includes(name)) t.classList.add('active'); });
+  if(name === 'history'){ loadSessions(); loadHistoryFilter(); }
+  if(name === 'settings') loadSettingsForm();
+}
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('themeIcon').textContent = t === 'dark' ? '☀️' : '🌙';
+}
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  api('PATCH','/api/settings',{theme:next}).catch(()=>{});
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+async function fetchAndRenderMiners(){
+  try { miners = await api('GET','/api/miners'); } catch(e){ miners = []; }
+  renderDashboard();
+}
+
+function renderDashboard(){
+  const ob  = document.getElementById('onboarding');
+  const dc  = document.getElementById('dashboard-content');
+  const hasMiners = miners.length > 0;
+  ob.style.display  = hasMiners ? 'none' : 'flex';
+  dc.style.display  = hasMiners ? 'block' : 'none';
+  if(!hasMiners) return;
+
+  // Global bar
+  const totalHR    = miners.reduce((s,m) => s + (m.stats?.hashRate || 0), 0);
+  const onlineCount= miners.filter(m => m.online).length;
+  const tuningCount= miners.filter(m => m.tuning?.state && !['idle','complete','error'].includes(m.tuning.state)).length;
+  document.getElementById('global-bar').innerHTML = `
+    <div class="stat-chip"><div class="label">Total Hashrate</div><div class="value accent">${fmtHR(totalHR)}</div></div>
+    <div class="stat-chip"><div class="label">Miners Online</div><div class="value">${onlineCount} / ${miners.length}</div></div>
+    <div class="stat-chip"><div class="label">Tuning Active</div><div class="value">${tuningCount}</div></div>`;
+
+  // Stop All visibility
+  document.getElementById('stopAllBtn').classList.toggle('visible', tuningCount > 0);
+
+  // Miner cards
+  document.getElementById('miners-grid').innerHTML = miners.map(m => minerCard(m)).join('');
+}
+
+function minerCard(m){
+  const s   = m.stats || {};
+  const t   = m.tuning || {};
+  const tState = t.state || 'idle';
+  const isActive = !['idle','complete','error'].includes(tState);
+  const isRestarting = t.restarting;
+  const dotClass = !m.online ? (isRestarting ? 'restarting' : 'offline') : 'online';
+
+  // Metric colour helpers
+  const tempCol = (v) => v > 70 ? 'var(--err)' : v > 60 ? 'var(--warn)' : 'var(--ok)';
+  const errCol  = (v) => v > 2  ? 'var(--err)' : v > 1  ? 'var(--warn)' : 'var(--ok)';
+  const hrPct   = Math.min((s.hashRate || 0) / 2000 * 100, 100);
+  const tmpPct  = Math.min((s.temp || 0)     / 80   * 100, 100);
+  const errRate = calcErrorRate(s);
+  const errPct  = Math.min(errRate / 5 * 100, 100);
+
+  // Tuning badge
+  let badgeClass = 'badge-idle', badgeText = 'Idle';
+  if(isRestarting)         { badgeClass='badge-restarting'; badgeText='Restarting…'; }
+  else if(tState==='observing') { badgeClass='badge-running';    badgeText='Observing'; }
+  else if(tState==='applying')  { badgeClass='badge-running';    badgeText='Applying'; }
+  else if(tState==='evaluating'){ badgeClass='badge-running';    badgeText='Evaluating'; }
+  else if(tState==='safety_backoff'){ badgeClass='badge-restarting'; badgeText='Backing Off'; }
+  else if(tState==='complete')  { badgeClass='badge-complete';   badgeText='Complete'; }
+  else if(tState==='error')     { badgeClass='badge-error';      badgeText='Error'; }
+
+  const timeLeft = t.time_remaining_s != null
+    ? ` · ${Math.ceil(t.time_remaining_s/60)}m left` : '';
+  const tuningMsg = t.message ? `<span style="color:var(--txt2);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(t.message)}</span>` : '';
+
+  const bestLabel = t.best_freq
+    ? `Best: ${t.best_freq}MHz / ${t.best_voltage}mV` : '';
+
+  return `
+  <div class="miner-card ${isActive?'tuning-active':''} ${!m.online&&!isRestarting?'offline':''}" id="card-${m.miner.id}">
+    <div class="card-header">
+      <div class="status-dot ${dotClass}"></div>
+      <div class="miner-name">${esc(m.miner.nickname || m.miner.ip)}</div>
+      <div class="miner-ip">${esc(m.miner.ip)}</div>
+      <div class="card-header-actions">
+        <button class="btn-icon btn-sm" title="Edit" onclick="openEditModal(${m.miner.id},'${esc(m.miner.nickname)}')">✏️</button>
+        <button class="btn-icon btn-sm" title="Remove" onclick="removeMiner(${m.miner.id})">🗑</button>
+      </div>
+    </div>
+
+    <div class="card-metrics">
+      <div class="metric-cell">
+        <div class="metric-label">Hashrate</div>
+        <div class="metric-value" style="color:var(--accent)">${fmtHR(s.hashRate)}</div>
+        <div class="metric-unit">GH/s</div>
+        <div class="metric-bar"><div class="metric-fill" style="width:${hrPct}%;background:var(--accent)"></div></div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Temp</div>
+        <div class="metric-value" style="color:${tempCol(s.temp||0)}">${s.temp ? s.temp.toFixed(1) : '—'}</div>
+        <div class="metric-unit">°C</div>
+        <div class="metric-bar"><div class="metric-fill" style="width:${tmpPct}%;background:${tempCol(s.temp||0)}"></div></div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Error Rate</div>
+        <div class="metric-value" style="color:${errCol(errRate)}">${errRate.toFixed(2)}</div>
+        <div class="metric-unit">%</div>
+        <div class="metric-bar"><div class="metric-fill" style="width:${errPct}%;background:${errCol(errRate)}"></div></div>
+      </div>
+    </div>
+
+    <div class="card-details">
+      <div class="detail-item"><div class="detail-label">Freq</div><div class="detail-value">${s.frequency || '—'} MHz</div></div>
+      <div class="detail-item"><div class="detail-label">Voltage</div><div class="detail-value">${s.coreVoltageActual || s.coreVoltage || '—'} mV</div></div>
+      <div class="detail-item"><div class="detail-label">Power</div><div class="detail-value">${s.power ? s.power.toFixed(1)+'W' : '—'}</div></div>
+      <div class="detail-item"><div class="detail-label">Fan</div><div class="detail-value">${s.fanspeed != null ? s.fanspeed+'%' : '—'}</div></div>
+      <div class="detail-item"><div class="detail-label">Fan RPM</div><div class="detail-value">${s.fanrpm || '—'}</div></div>
+      <div class="detail-item"><div class="detail-label">VRM Temp</div><div class="detail-value">${s.vrTemp != null ? s.vrTemp+'°C' : (s.boardtemp1 != null ? s.boardtemp1+'°C' : '—')}</div></div>
+    </div>
+
+    <div class="card-tuning">
+      <div class="tuning-status">
+        <span class="tuning-badge ${badgeClass}">${badgeText}</span>
+        ${tuningMsg}
+        ${timeLeft ? `<span style="font-size:11px;color:var(--txt2);flex-shrink:0">${timeLeft}</span>` : ''}
+      </div>
+    </div>
+
+    <div class="card-actions">
+      ${!isActive
+        ? `<button class="btn btn-primary btn-sm" onclick="openTuneModal(${m.miner.id},'${esc(m.miner.nickname||m.miner.ip)}')" ${!m.online?'disabled title="Miner offline"':''}>▶ Tune</button>`
+        : `<button class="btn btn-danger btn-sm" onclick="stopTuning(${m.miner.id})">⏹ Stop</button>`
+      }
+      ${bestLabel ? `<span class="best-label">${bestLabel}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── Add / Edit / Remove miners ─────────────────────────────────────────────
+function openAddMinerModal(){
+  document.getElementById('am_ip').value  = '';
+  document.getElementById('am_nick').value = '';
+  openModal('addMinerModal');
+}
+async function addMiner(){
+  const ip   = document.getElementById('am_ip').value.trim();
+  const nick = document.getElementById('am_nick').value.trim();
+  if(!ip){ toast('Enter an IP address','err'); return; }
+  try{
+    await api('POST','/api/miners',{ip, nickname:nick||undefined});
+    closeModal('addMinerModal');
+    toast('Miner added!','ok');
+    fetchAndRenderMiners();
+    loadHistoryFilter();
+  }catch(e){ toast('Could not add miner: '+e.message,'err'); }
+}
+
+function openEditModal(id, nick){
+  document.getElementById('em_id').value   = id;
+  document.getElementById('em_nick').value = nick;
+  openModal('editMinerModal');
+}
+async function saveNickname(){
+  const id   = parseInt(document.getElementById('em_id').value);
+  const nick = document.getElementById('em_nick').value.trim();
+  await api('PATCH',`/api/miners/${id}`,{nickname:nick});
+  closeModal('editMinerModal');
+  toast('Nickname saved','ok');
+  fetchAndRenderMiners();
+}
+
+async function removeMiner(id){
+  if(!confirm('Remove this miner? Its history will remain.')) return;
+  await api('DELETE',`/api/miners/${id}`);
+  fetchAndRenderMiners();
+  loadHistoryFilter();
+}
+
+// ── Tuning modal helpers ───────────────────────────────────────────────────
+function openTuneModal(id, name){
+  document.getElementById('tm_id').value = id;
+  document.getElementById('tm_name').textContent = name;
+  // Pre-fill safety limits from global settings
+  document.getElementById('tm_max_temp').value  = settings.max_temp  || 65;
+  document.getElementById('tm_max_volt').value  = settings.max_voltage || 1250;
+  document.getElementById('tm_err_thresh').value= settings.error_rate_threshold || 1.0;
+  openModal('tuneModal');
+}
+
+function setStepMode(m){
+  stepMode = m;
+  document.getElementById('sm_fast').classList.toggle('active', m==='fast');
+  document.getElementById('sm_slow').classList.toggle('active', m==='slow');
+}
+function setTimeLimit(m){
+  timeLimitMode = m;
+  document.getElementById('tl_none').classList.toggle('active', m===null);
+  document.getElementById('tl_custom').classList.toggle('active', m==='custom');
+  document.getElementById('tl_input').style.display = m==='custom' ? 'block' : 'none';
+}
+function setBaseline(m){
+  baselineMode = m;
+  document.getElementById('bl_stock').classList.toggle('active', m==='stock');
+  document.getElementById('bl_custom').classList.toggle('active', m==='custom');
+  document.getElementById('bl_custom_inputs').style.display = m==='custom' ? 'block' : 'none';
+}
+
+function movePriority(btn, dir){
+  const list = document.getElementById('priorityList');
+  const item = btn.closest('.priority-item');
+  const items = [...list.children];
+  const idx  = items.indexOf(item);
+  const newIdx = idx + dir;
+  if(newIdx < 0 || newIdx >= items.length) return;
+  if(dir === -1) list.insertBefore(item, items[newIdx]);
+  else list.insertBefore(items[newIdx], item);
+  // Update numbers
+  [...list.children].forEach((el, i) => {
+    el.querySelector('.priority-num').textContent = ['①','②','③'][i];
+  });
+}
+
+async function submitTuning(){
+  const id = parseInt(document.getElementById('tm_id').value);
+  const priorityKeys = [...document.querySelectorAll('#priorityList .priority-item')]
+    .map(el => el.dataset.key);
+
+  let timeLimitMinutes = null;
+  if(timeLimitMode === 'custom'){
+    timeLimitMinutes = parseInt(document.getElementById('tm_minutes').value);
+    if(!timeLimitMinutes || timeLimitMinutes < 1){ toast('Enter a valid time limit','err'); return; }
+  }
+
+  let baselineFreq = 525, baselineVoltage = 1150;
+  if(baselineMode === 'custom'){
+    baselineFreq    = parseInt(document.getElementById('tm_freq').value) || 525;
+    baselineVoltage = parseInt(document.getElementById('tm_volt').value) || 1150;
+  } else {
+    // Read from live stats if available
+    const m = miners.find(x => x.miner.id === id);
+    if(m?.stats){
+      baselineFreq    = m.stats.frequency    || 525;
+      baselineVoltage = m.stats.coreVoltage  || 1150;
+    }
+  }
+
+  const body = {
+    priority: priorityKeys,
+    step_mode: stepMode,
+    max_temp: parseFloat(document.getElementById('tm_max_temp').value) || 65,
+    max_voltage: parseInt(document.getElementById('tm_max_volt').value) || 1250,
+    error_threshold: parseFloat(document.getElementById('tm_err_thresh').value) || 1.0,
+    time_limit_minutes: timeLimitMinutes,
+    baseline_freq: baselineFreq,
+    baseline_voltage: baselineVoltage,
+  };
+
+  try{
+    await api('POST',`/api/miners/${id}/tune/start`, body);
+    closeModal('tuneModal');
+    toast('Tuning started!','ok');
+  }catch(e){ toast('Could not start tuning: '+e.message,'err'); }
+}
+
+async function stopTuning(id){
+  await api('POST',`/api/miners/${id}/tune/stop`);
+  toast('Tuning stopped','info');
+}
+async function stopAllTuning(){
+  await api('POST','/api/tune/stop-all');
+  toast('All tuning stopped','info');
+}
+
+// ── History ────────────────────────────────────────────────────────────────
+async function loadSessions(){
+  const minerId = document.getElementById('historyMinerFilter')?.value;
+  const url = minerId ? `/api/sessions?miner_id=${minerId}` : '/api/sessions';
+  let sessions = [];
+  try{ sessions = await api('GET', url); }catch(e){}
+
+  const list = document.getElementById('sessions-list');
+  if(!sessions.length){
+    list.innerHTML = '<div class="no-sessions">No tuning sessions yet.</div>';
+    return;
+  }
+  list.innerHTML = sessions.map(s => {
+    const dt = new Date(s.started_at * 1000).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const dur = s.ended_at ? Math.round((s.ended_at - s.started_at)/60)+'m' : 'Running…';
+    const checked = selectedSessions.has(s.id);
+    return `<div class="session-item ${checked?'selected':''}" onclick="toggleSession(${s.id}, this)">
+      <input type="checkbox" class="session-check" ${checked?'checked':''} onclick="event.stopPropagation();toggleSession(${s.id}, this.closest('.session-item'))"/>
+      <div class="session-info">
+        <div class="session-name">${esc(s.name)}</div>
+        <div class="session-meta">${esc(s.nickname || s.ip)} · ${dt} · ${dur}</div>
+        ${s.best_hashrate ? `<div class="session-meta" style="color:var(--accent)">${fmtHR(s.best_hashrate)} GH/s · ${s.best_temp?.toFixed(1)}°C · ${s.best_error_rate?.toFixed(2)}% err</div>` : ''}
+      </div>
+      <button class="session-delete" onclick="event.stopPropagation();deleteSession(${s.id})" title="Delete">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+async function loadHistoryFilter(){
+  const sel = document.getElementById('historyMinerFilter');
+  if(!sel) return;
+  try{
+    const ms = await api('GET','/api/miners');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All Miners</option>' +
+      ms.map(m => `<option value="${m.id}" ${cur==m.id?'selected':''}>${esc(m.nickname||m.ip)}</option>`).join('');
+  }catch(e){}
+}
+
+async function toggleSession(id, el){
+  if(selectedSessions.has(id)) selectedSessions.delete(id);
+  else selectedSessions.add(id);
+  el.classList.toggle('selected', selectedSessions.has(id));
+  const cb = el.querySelector('input[type=checkbox]');
+  if(cb) cb.checked = selectedSessions.has(id);
+  await renderHistoryChart();
+}
+
+async function renderHistoryChart(){
+  const canvas = document.getElementById('historyChart');
+  const placeholder = document.getElementById('chartPlaceholder');
+  const summaries = document.getElementById('session-summaries');
+
+  if(selectedSessions.size === 0){
+    canvas.style.display = 'none';
+    placeholder.style.display = 'flex';
+    summaries.innerHTML = '';
+    return;
+  }
+
+  placeholder.style.display = 'none';
+  canvas.style.display = 'block';
+
+  const sessionData = [];
+  for(const id of selectedSessions){
+    try{
+      const s = await api('GET',`/api/sessions/${id}`);
+      sessionData.push(s);
+    }catch(e){}
+  }
+
+  if(historyChart) historyChart.destroy();
+
+  const datasets = [];
+  const colorIdx = {};
+  sessionData.forEach((s, i) => {
+    const color = SESSION_COLORS[i % SESSION_COLORS.length];
+    colorIdx[s.id] = color;
+    const pts = s.datapoints || [];
+    const t0  = pts[0]?.timestamp || 0;
+
+    if(visibleMetrics.has('hashrate')){
+      datasets.push({
+        label: `${s.name} — Hashrate (GH/s)`,
+        data: pts.map(p => ({x: Math.round((p.timestamp-t0)/60), y: p.hashrate})),
+        borderColor: color, backgroundColor: color+'22',
+        yAxisID: 'yLeft', tension: .3, pointRadius: 3,
+        borderDash: [],
+      });
+    }
+    if(visibleMetrics.has('temp')){
+      datasets.push({
+        label: `${s.name} — Temp (°C)`,
+        data: pts.map(p => ({x: Math.round((p.timestamp-t0)/60), y: p.temp})),
+        borderColor: color, backgroundColor: 'transparent',
+        yAxisID: 'yLeft', tension: .3, pointRadius: 3,
+        borderDash: [6,3],
+      });
+    }
+    if(visibleMetrics.has('error_rate')){
+      datasets.push({
+        label: `${s.name} — Error Rate (%)`,
+        data: pts.map(p => ({x: Math.round((p.timestamp-t0)/60), y: p.error_rate})),
+        borderColor: color, backgroundColor: 'transparent',
+        yAxisID: 'yRight', tension: .3, pointRadius: 3,
+        borderDash: [2,2],
+      });
+    }
+  });
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor  = isDark ? '#232323' : '#e5e5e5';
+  const labelColor = isDark ? '#8a8a8a' : '#666';
+
+  historyChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type:'linear', title:{display:true,text:'Time (min)',color:labelColor},
+             grid:{color:gridColor}, ticks:{color:labelColor} },
+        yLeft: { type:'linear', position:'left', title:{display:true,text:'GH/s  /  °C',color:labelColor},
+                 grid:{color:gridColor}, ticks:{color:labelColor} },
+        yRight:{ type:'linear', position:'right', title:{display:true,text:'Error Rate (%)',color:labelColor},
+                 grid:{drawOnChartArea:false}, ticks:{color:labelColor} },
+      },
+      plugins: {
+        legend:{ labels:{color:labelColor,usePointStyle:true,pointStyleWidth:12} },
+        tooltip:{ backgroundColor: isDark?'#161616':'#fff',
+                  borderColor: isDark?'#2e2e2e':'#ddd', borderWidth:1,
+                  titleColor:isDark?'#f0f0f0':'#111',
+                  bodyColor:isDark?'#8a8a8a':'#555' },
+      },
+    },
+  });
+
+  // Render summaries
+  summaries.innerHTML = sessionData.map(s => {
+    const color = colorIdx[s.id];
+    let sum = {};
+    try{ sum = JSON.parse(s.summary.replace(/'/g,'"')); }catch(e){}
+    return `<div class="summary-card" style="border-left:3px solid ${color}">
+      <div class="summary-title">${esc(s.name)} — <span style="color:${color}">${esc(s.nickname||s.ip||'')}</span></div>
+      <div class="summary-grid">
+        <div class="summary-item"><div class="s-label">Best Freq</div><div class="s-value">${s.best_freq||'—'} MHz</div></div>
+        <div class="summary-item"><div class="s-label">Best Voltage</div><div class="s-value">${s.best_voltage||'—'} mV</div></div>
+        <div class="summary-item"><div class="s-label">Hashrate</div><div class="s-value" style="color:var(--accent)">${fmtHR(s.best_hashrate)} GH/s</div></div>
+        <div class="summary-item"><div class="s-label">Temperature</div><div class="s-value">${s.best_temp?.toFixed(1)||'—'} °C</div></div>
+        <div class="summary-item"><div class="s-label">Error Rate</div><div class="s-value">${s.best_error_rate?.toFixed(3)||'—'} %</div></div>
+        <div class="summary-item"><div class="s-label">Duration</div><div class="s-value">${sum.duration_min||'—'} min</div></div>
+      </div>
+      ${sum.why ? `<div class="summary-why">💡 ${esc(sum.why)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function toggleMetric(btn){
+  const m = btn.dataset.metric;
+  if(visibleMetrics.has(m)) visibleMetrics.delete(m);
+  else visibleMetrics.add(m);
+  btn.classList.toggle('active', visibleMetrics.has(m));
+  renderHistoryChart();
+}
+
+async function deleteSession(id){
+  if(!confirm('Delete this session permanently?')) return;
+  await api('DELETE',`/api/sessions/${id}`);
+  selectedSessions.delete(id);
+  loadSessions();
+  renderHistoryChart();
+}
+
+// ── Settings form ──────────────────────────────────────────────────────────
+function loadSettingsForm(){
+  const v = (id, key) => {
+    const el = document.getElementById(id);
+    if(el && settings[key] !== undefined) el.value = settings[key];
+  };
+  v('s_max_temp',   'max_temp');
+  v('s_max_voltage','max_voltage');
+  v('s_error_rate', 'error_rate_threshold');
+}
+async function saveSettings(){
+  const body = {
+    max_temp:             document.getElementById('s_max_temp').value,
+    max_voltage:          document.getElementById('s_max_voltage').value,
+    error_rate_threshold: document.getElementById('s_error_rate').value,
+  };
+  await api('PATCH','/api/settings', body);
+  settings = await api('GET','/api/settings');
+  toast('Settings saved','ok');
+}
+
+// ── Modals ─────────────────────────────────────────────────────────────────
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-backdrop').forEach(m => {
+  m.addEventListener('click', e => { if(e.target === m) m.classList.remove('open'); });
+});
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type='info'){
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(()=>el.remove(), 3500);
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmtHR(v){
+  if(!v && v !== 0) return '—';
+  if(v >= 1000) return (v/1000).toFixed(2)+' TH/s';
+  return v.toFixed(1)+' GH/s';
+}
+function calcErrorRate(s){
+  const acc = s.sharesAccepted || 0;
+  const rej = s.sharesRejected || 0;
+  const tot = acc + rej;
+  return tot > 0 ? (rej / tot * 100) : 0;
+}
+function esc(s){
+  if(s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

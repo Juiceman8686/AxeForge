@@ -194,12 +194,14 @@ async def start_tuning(miner_id: int, body: dict):
 
     raw_max_temp = float(body.get("max_temp", settings.get("max_temp", 65)))
     raw_max_volt = int(body.get("max_voltage", settings.get("max_voltage", 1250)))
+    raw_max_freq = int(body.get("max_freq", settings.get("max_freq", 1000)))
 
     config = TunerConfig(
         priority           = body.get("priority", ["hashrate", "temp", "error_rate"]),
         step_mode          = body.get("step_mode", "slow"),
         max_temp           = min(raw_max_temp, HARD_MAX_TEMP),
         max_voltage        = min(raw_max_volt,  HARD_MAX_VOLTAGE),
+        max_freq           = min(raw_max_freq,  HARD_MAX_FREQ),
         error_threshold    = float(body.get("error_threshold",
                                             settings.get("error_rate_threshold", 1.0))),
         time_limit_minutes = body.get("time_limit_minutes"),   # None = indefinite
@@ -262,6 +264,8 @@ async def update_settings(body: dict):
         body["max_temp"] = str(min(float(body["max_temp"]), HARD_MAX_TEMP))
     if "max_voltage" in body:
         body["max_voltage"] = str(min(int(body["max_voltage"]), HARD_MAX_VOLTAGE))
+    if "max_freq" in body:
+        body["max_freq"] = str(min(int(body["max_freq"]), HARD_MAX_FREQ))
     for k, v in body.items():
         db.set_setting(k, str(v))
     return {"ok": True}

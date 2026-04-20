@@ -115,9 +115,10 @@ class TunerManager:
     def get_status(self, miner_id: int) -> Dict:
         s = self._statuses.get(miner_id, TunerStatus())
         remaining = None
-        if s.time_limit_minutes and s.start_time:
+        time_limit = s.config.time_limit_minutes if s.config else None
+        if time_limit and s.start_time:
             elapsed_s = time.time() - s.start_time
-            remaining = max(0, int(s.time_limit_minutes * 60 - elapsed_s))
+            remaining = max(0, int(time_limit * 60 - elapsed_s))
         return {
             "state":        s.state.value,
             "message":      s.message,

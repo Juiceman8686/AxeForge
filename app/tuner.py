@@ -29,10 +29,11 @@ from miner_client import MinerClient
 logger = logging.getLogger(__name__)
 
 # ── Hard ceilings (immutable) ─────────────────────────────────────────────────
-HARD_MAX_TEMP    = 80.0
-HARD_MAX_VOLTAGE = 1400
-HARD_MIN_FREQ    = 400
-HARD_MAX_FREQ    = 1100
+HARD_MAX_TEMP     = 80.0
+HARD_MAX_VRM_TEMP = 90.0
+HARD_MAX_VOLTAGE  = 1400
+HARD_MIN_FREQ     = 400
+HARD_MAX_FREQ     = 1100
 
 # ── Step sizes ────────────────────────────────────────────────────────────────
 STEP_FREQ = {"fast": 25, "slow": 25}   # MHz
@@ -70,6 +71,7 @@ class TunerConfig:
     priority:           List[str]
     step_mode:          str
     max_temp:           float
+    max_vrm_temp:       float
     max_voltage:        int
     max_freq:           int
     error_threshold:    float
@@ -97,6 +99,9 @@ class StabilityResult:
     avg_temp:           float
     temp_trend:         float   # °C change start → end of window
     temp_variance:      float   # std dev
+    avg_vrm_temp:       float
+    vrm_temp_trend:     float
+    vrm_temp_headroom:  float   # °C below ceiling
 
     # Error rate
     avg_error_rate:     float
@@ -151,6 +156,7 @@ class TunerStatus:
     obs_hashrates:      List[float] = field(default_factory=list)
     obs_hashrates_1m:   List[float] = field(default_factory=list)
     obs_temps:          List[float] = field(default_factory=list)
+    obs_vrm_temps:      List[float] = field(default_factory=list)
     obs_error_pcts:     List[float] = field(default_factory=list)
     obs_powers:         List[float] = field(default_factory=list)
     obs_shares_acc_start: int = 0
@@ -163,6 +169,7 @@ class TunerStatus:
 
     _safety_breach:  bool = False
     _stop_requested: bool = False
+    _stop_event:     Optional[asyncio.Event] = field(default=None, repr=False)
 
 
 # ── Stability analyser ────────────────────────────────────────────────────────
@@ -255,7 +262,37 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
         tmp_stab *= 0.75
         reasons.append(f"Temperature unstable (σ={std_tmp:.1f}°C — possible throttling)")
 
-    # ── 4. Error rate analysis ────────────────────────────────────────────────
+    # ── 4. VRM temperature analysis ───────────────────────────────────────────
+    vrm_temps  = s.obs_vrm_temps
+    avg_vrm    = _mean(vrm_temps) if vrm_temps else 0.0
+    vrm_trend  = _trend_abs(vrm_temps) if vrm_temps else 0.0
+    eff_max_vrm = min(cfg.max_vrm_temp, HARD_MAX_VRM_TEMP)
+    vrm_headroom = eff_max_vrm - avg_vrm
+
+    if avg_vrm <= 0:
+        # VRM temp not reported by this miner — don't penalise
+        vrm_stab = 1.0
+    elif vrm_headroom >= eff_max_vrm * 0.20:
+        vrm_stab = 1.0
+    elif vrm_headroom >= eff_max_vrm * 0.12:
+        vrm_stab = 0.80
+    elif vrm_headroom >= eff_max_vrm * 0.06:
+        vrm_stab = 0.50
+        reasons.append(f"VRM temp {avg_vrm:.1f}°C close to ceiling {eff_max_vrm:.0f}°C")
+    else:
+        vrm_stab = 0.15
+        reasons.append(f"VRM temp {avg_vrm:.1f}°C critically close to ceiling {eff_max_vrm:.0f}°C")
+
+    if vrm_trend >= TEMP_TREND_BAD:
+        vrm_stab *= 0.35
+        reasons.append(f"VRM temp rising rapidly (+{vrm_trend:.1f}°C) — thermal issue")
+    elif vrm_trend >= TEMP_TREND_MARGINAL:
+        vrm_stab *= 0.65
+        reasons.append(f"VRM temp trending up (+{vrm_trend:.1f}°C)")
+    elif vrm_trend >= TEMP_TREND_FINE:
+        vrm_stab *= 0.88
+
+    # ── 5. Error rate analysis ────────────────────────────────────────────────
     if share_delta >= MIN_SHARES_TRUST:
         win_err = (rej_delta / share_delta * 100.0) if share_delta > 0 else 0.0
     else:
@@ -291,7 +328,7 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
 
     err_stab = err_stab * err_conf
 
-    # ── 5. Power analysis ─────────────────────────────────────────────────────
+    # ── 6. Power analysis ─────────────────────────────────────────────────────
     avg_pwr  = _mean(pwrs)
     cv_pwr   = _stdev(pwrs) / avg_pwr if avg_pwr > 0 else 0
     eff_gh_w = avg_hr / avg_pwr if avg_pwr > 0 else 0
@@ -303,19 +340,21 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
     elif cv_pwr > 0.05:
         pwr_stab = 0.88
 
-    # ── 6. Composite stability multiplier ─────────────────────────────────────
-    # Temperature trend is the most important safety signal.
-    # Hashrate consistency is next (shows ASIC health).
-    # Error rate weighted third.
-    # Power is a supporting signal.
+    # ── 7. Composite stability multiplier ─────────────────────────────────────
+    # ASIC temp trend: most important safety signal
+    # Hashrate CV: ASIC health indicator
+    # VRM temp: independent thermal constraint
+    # Error rate: instability signal
+    # Power variance: supporting signal
     stability_mult = max(0.0, min(1.0,
-        0.35 * tmp_stab  +
-        0.30 * hr_stab   +
-        0.25 * err_stab  +
-        0.10 * pwr_stab
+        0.28 * tmp_stab  +
+        0.27 * hr_stab   +
+        0.20 * vrm_stab  +
+        0.18 * err_stab  +
+        0.07 * pwr_stab
     ) * confidence)
 
-    # ── 7. Performance score ──────────────────────────────────────────────────
+    # ── 8. Performance score ──────────────────────────────────────────────────
     weights = {
         cfg.priority[0]: 0.60,
         cfg.priority[1]: 0.30,
@@ -333,13 +372,19 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
 
     final_score = round(perf * stability_mult, 4)
 
-    # ── 8. Verdict ────────────────────────────────────────────────────────────
-    hard_breach = avg_tmp >= eff_max_tmp or win_err >= eff_thresh * 1.5
+    # ── 9. Verdict ────────────────────────────────────────────────────────────
+    hard_breach = (
+        avg_tmp  >= eff_max_tmp or
+        (avg_vrm > 0 and avg_vrm >= eff_max_vrm) or
+        win_err  >= eff_thresh * 1.5
+    )
 
     if hard_breach:
         verdict, should_proceed, backoff_steps = "critical", False, 2
         if avg_tmp >= eff_max_tmp:
-            reasons.append(f"Hard ceiling breach: {avg_tmp:.1f}°C ≥ {eff_max_tmp:.0f}°C")
+            reasons.append(f"Hard ceiling breach: ASIC {avg_tmp:.1f}°C ≥ {eff_max_tmp:.0f}°C")
+        if avg_vrm > 0 and avg_vrm >= eff_max_vrm:
+            reasons.append(f"Hard ceiling breach: VRM {avg_vrm:.1f}°C ≥ {eff_max_vrm:.0f}°C")
         if win_err >= eff_thresh * 1.5:
             reasons.append(f"Hard ceiling breach: error {win_err:.2f}% ≥ {eff_thresh*1.5:.1f}%")
     elif stability_mult >= 0.75:
@@ -363,6 +408,8 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
         hashrate_trend_pct=round(hr_trend,2), hashrate_vs_1m=round(hr_vs_1m_pct,2),
         avg_temp=round(avg_tmp,1), temp_trend=round(tmp_trend,2),
         temp_variance=round(std_tmp,2),
+        avg_vrm_temp=round(avg_vrm,1), vrm_temp_trend=round(vrm_trend,2),
+        vrm_temp_headroom=round(vrm_headroom,1),
         avg_error_rate=round(win_err,3), peak_error_rate=round(peak_err,3),
         error_trend=round(err_trend,3), share_delta=share_delta,
         avg_power=round(avg_pwr,2), efficiency_gh_w=round(eff_gh_w,3),
@@ -421,6 +468,8 @@ class TunerManager:
         s = self._statuses.get(miner_id)
         if s:
             s._stop_requested = True
+            if s._stop_event:
+                s._stop_event.set()   # immediately interrupt the observation sleep
 
     # ── Called every second by the polling loop ───────────────────────────────
 
@@ -432,21 +481,35 @@ class TunerManager:
         s.obs_hashrates_1m.append(stats.get("hashRate_1m",     0) or
                                    stats.get("hashRate",        0) or 0)
         s.obs_temps.append(       stats.get("temp",            0) or 0)
+        s.obs_vrm_temps.append(   stats.get("vrTemp",          0) or
+                                   stats.get("boardtemp1",     0) or 0)
         s.obs_error_pcts.append(  stats.get("errorPercentage", 0) or 0)
         s.obs_powers.append(      stats.get("power",           0) or 0)
         s.obs_shares_acc_end = stats.get("sharesAccepted", s.obs_shares_acc_start)
         s.obs_shares_rej_end = stats.get("sharesRejected", s.obs_shares_rej_start)
 
         cfg = s.config
-        if cfg and (stats.get("temp") or 0) >= min(cfg.max_temp, HARD_MAX_TEMP):
-            s._safety_breach = True
-            s.message = f"⚠ Temp {stats.get('temp')}°C hit ceiling — backing off"
+        if cfg:
+            asic_temp = stats.get("temp") or 0
+            vrm_temp  = stats.get("vrTemp") or stats.get("boardtemp1") or 0
+            if asic_temp >= min(cfg.max_temp, HARD_MAX_TEMP):
+                s._safety_breach = True
+                s.message = f"⚠ ASIC temp {asic_temp}°C hit ceiling — backing off"
+                if s._stop_event:
+                    s._stop_event.set()
+            elif vrm_temp > 0 and vrm_temp >= min(cfg.max_vrm_temp, HARD_MAX_VRM_TEMP):
+                s._safety_breach = True
+                s.message = f"⚠ VRM temp {vrm_temp}°C hit ceiling — backing off"
+                if s._stop_event:
+                    s._stop_event.set()
 
     def on_miner_offline(self, miner_id: int):
         s = self._statuses.get(miner_id)
         if s and s.state == TunerState.OBSERVING:
             s._safety_breach = True
             s.message = "⚠ Miner went offline during observation"
+            if s._stop_event:
+                s._stop_event.set()
 
     # ── Main tuning loop ──────────────────────────────────────────────────────
 
@@ -526,7 +589,20 @@ class TunerManager:
                 s.state   = TunerState.OBSERVING
                 s.message = f"Observing {cur_freq} MHz / {cur_volt} mV ({obs_secs}s)…"
 
-                await asyncio.sleep(obs_secs)
+                # Use an event so stop requests interrupt immediately
+                stop_event = asyncio.Event()
+                s._stop_event = stop_event
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=obs_secs)
+                except asyncio.TimeoutError:
+                    pass   # Normal path — observation window completed
+                finally:
+                    s._stop_event = None
+
+                # Check for user stop first — exit immediately
+                if s._stop_requested:
+                    s.message = "Stopped by user"
+                    break
 
                 # Hard safety breach during observation
                 if s._safety_breach:
@@ -595,7 +671,10 @@ class TunerManager:
 
                 # Auto-switch to slow near ceilings
                 eff_max_volt = min(cfg.max_voltage, HARD_MAX_VOLTAGE)
+                eff_max_vrm  = min(cfg.max_vrm_temp, HARD_MAX_VRM_TEMP)
+                avg_vrm_now  = _mean(s.obs_vrm_temps) if s.obs_vrm_temps else 0
                 if (result.avg_temp >= min(cfg.max_temp, HARD_MAX_TEMP) * NEAR_LIMIT_FRACTION or
+                        (avg_vrm_now > 0 and avg_vrm_now >= eff_max_vrm * NEAR_LIMIT_FRACTION) or
                         result.avg_error_rate >= cfg.error_threshold * (NEAR_LIMIT_FRACTION - 0.1) or
                         cur_volt >= eff_max_volt * NEAR_LIMIT_FRACTION or
                         cur_freq >= eff_ceil_freq * NEAR_LIMIT_FRACTION):

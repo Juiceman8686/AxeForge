@@ -365,9 +365,21 @@ main{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:24px 20p
               <div class="hard-limit">Hard ceiling: 80°C</div>
             </div>
             <div class="form-group">
+              <label class="form-label">Max VRM Temperature (°C)</label>
+              <input id="s_max_vrm_temp" type="number" class="form-input" min="40" max="90" step="1"/>
+              <div class="hard-limit">Hard ceiling: 90°C</div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
               <label class="form-label">Max Voltage (mV)</label>
               <input id="s_max_voltage" type="number" class="form-input" min="1100" max="1400" step="10"/>
               <div class="hard-limit">Hard ceiling: 1400 mV</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max Frequency (MHz)</label>
+              <input id="s_max_freq" type="number" class="form-input" min="400" max="1100" step="25"/>
+              <div class="hard-limit">Hard ceiling: 1100 MHz</div>
             </div>
           </div>
           <div class="form-group">
@@ -542,14 +554,26 @@ main{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:24px 20p
         <label class="form-label">Safety Limits for This Session</label>
         <div class="form-row">
           <div>
-            <label class="form-label" style="margin-bottom:4px">Max Temp (°C)</label>
+            <label class="form-label" style="margin-bottom:4px">Max ASIC Temp (°C)</label>
             <input id="tm_max_temp" type="number" class="form-input" min="40" max="80" step="1"/>
             <div class="hard-limit">Hard ceiling: 80°C</div>
           </div>
           <div>
+            <label class="form-label" style="margin-bottom:4px">Max VRM Temp (°C)</label>
+            <input id="tm_max_vrm_temp" type="number" class="form-input" min="40" max="90" step="1"/>
+            <div class="hard-limit">Hard ceiling: 90°C</div>
+          </div>
+        </div>
+        <div class="form-row" style="margin-top:8px">
+          <div>
             <label class="form-label" style="margin-bottom:4px">Max Voltage (mV)</label>
             <input id="tm_max_volt" type="number" class="form-input" min="1100" max="1400" step="10"/>
             <div class="hard-limit">Hard ceiling: 1400 mV</div>
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Max Frequency (MHz)</label>
+            <input id="tm_max_freq" type="number" class="form-input" min="400" max="1100" step="25"/>
+            <div class="hard-limit">Hard ceiling: 1100 MHz</div>
           </div>
         </div>
         <div style="margin-top:8px">
@@ -822,9 +846,11 @@ function openTuneModal(id, name){
   document.getElementById('tm_id').value = id;
   document.getElementById('tm_name').textContent = name;
   // Pre-fill safety limits from global settings
-  document.getElementById('tm_max_temp').value  = settings.max_temp  || 65;
-  document.getElementById('tm_max_volt').value  = settings.max_voltage || 1250;
-  document.getElementById('tm_err_thresh').value= settings.error_rate_threshold || 1.0;
+  document.getElementById('tm_max_temp').value     = settings.max_temp     || 65;
+  document.getElementById('tm_max_vrm_temp').value  = settings.max_vrm_temp || 80;
+  document.getElementById('tm_max_volt').value      = settings.max_voltage  || 1250;
+  document.getElementById('tm_max_freq').value      = settings.max_freq     || 1000;
+  document.getElementById('tm_err_thresh').value    = settings.error_rate_threshold || 1.0;
   openModal('tuneModal');
 }
 
@@ -888,9 +914,11 @@ async function submitTuning(){
   const body = {
     priority: priorityKeys,
     step_mode: stepMode,
-    max_temp: parseFloat(document.getElementById('tm_max_temp').value) || 65,
-    max_voltage: parseInt(document.getElementById('tm_max_volt').value) || 1250,
-    error_threshold: parseFloat(document.getElementById('tm_err_thresh').value) || 1.0,
+    max_temp:        parseFloat(document.getElementById('tm_max_temp').value)     || 65,
+    max_vrm_temp:    parseFloat(document.getElementById('tm_max_vrm_temp').value) || 80,
+    max_voltage:     parseInt(document.getElementById('tm_max_volt').value)       || 1250,
+    max_freq:        parseInt(document.getElementById('tm_max_freq').value)       || 1000,
+    error_threshold: parseFloat(document.getElementById('tm_err_thresh').value)   || 1.0,
     time_limit_minutes: timeLimitMinutes,
     baseline_freq: baselineFreq,
     baseline_voltage: baselineVoltage,
@@ -1092,14 +1120,18 @@ function loadSettingsForm(){
     const el = document.getElementById(id);
     if(el && settings[key] !== undefined) el.value = settings[key];
   };
-  v('s_max_temp',   'max_temp');
-  v('s_max_voltage','max_voltage');
-  v('s_error_rate', 'error_rate_threshold');
+  v('s_max_temp',     'max_temp');
+  v('s_max_vrm_temp', 'max_vrm_temp');
+  v('s_max_voltage',  'max_voltage');
+  v('s_max_freq',     'max_freq');
+  v('s_error_rate',   'error_rate_threshold');
 }
 async function saveSettings(){
   const body = {
     max_temp:             document.getElementById('s_max_temp').value,
+    max_vrm_temp:         document.getElementById('s_max_vrm_temp').value,
     max_voltage:          document.getElementById('s_max_voltage').value,
+    max_freq:             document.getElementById('s_max_freq').value,
     error_rate_threshold: document.getElementById('s_error_rate').value,
   };
   await api('PATCH','/api/settings', body);

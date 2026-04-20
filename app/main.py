@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from database import Database
 from miner_client import MinerClient
-from tuner import HARD_MAX_TEMP, HARD_MAX_VOLTAGE, HARD_MAX_FREQ, TunerConfig, TunerManager
+from tuner import HARD_MAX_TEMP, HARD_MAX_VRM_TEMP, HARD_MAX_VOLTAGE, HARD_MAX_FREQ, TunerConfig, TunerManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -192,19 +192,21 @@ async def start_tuning(miner_id: int, body: dict):
 
     settings = db.get_all_settings()
 
-    raw_max_temp = float(body.get("max_temp", settings.get("max_temp", 65)))
-    raw_max_volt = int(body.get("max_voltage", settings.get("max_voltage", 1250)))
-    raw_max_freq = int(body.get("max_freq", settings.get("max_freq", 1000)))
+    raw_max_temp     = float(body.get("max_temp",     settings.get("max_temp",     65)))
+    raw_max_vrm_temp = float(body.get("max_vrm_temp", settings.get("max_vrm_temp", 80)))
+    raw_max_volt     = int(body.get("max_voltage",    settings.get("max_voltage",   1250)))
+    raw_max_freq     = int(body.get("max_freq",       settings.get("max_freq",      1000)))
 
     config = TunerConfig(
         priority           = body.get("priority", ["hashrate", "temp", "error_rate"]),
         step_mode          = body.get("step_mode", "slow"),
-        max_temp           = min(raw_max_temp, HARD_MAX_TEMP),
-        max_voltage        = min(raw_max_volt,  HARD_MAX_VOLTAGE),
-        max_freq           = min(raw_max_freq,  HARD_MAX_FREQ),
+        max_temp           = min(raw_max_temp,     HARD_MAX_TEMP),
+        max_vrm_temp       = min(raw_max_vrm_temp, HARD_MAX_VRM_TEMP),
+        max_voltage        = min(raw_max_volt,     HARD_MAX_VOLTAGE),
+        max_freq           = min(raw_max_freq,     HARD_MAX_FREQ),
         error_threshold    = float(body.get("error_threshold",
                                             settings.get("error_rate_threshold", 1.0))),
-        time_limit_minutes = body.get("time_limit_minutes"),   # None = indefinite
+        time_limit_minutes = body.get("time_limit_minutes"),
         baseline_freq      = int(body.get("baseline_freq", 525)),
         baseline_voltage   = int(body.get("baseline_voltage", 1150)),
     )
@@ -262,6 +264,8 @@ async def update_settings(body: dict):
     # Enforce hard ceilings silently
     if "max_temp" in body:
         body["max_temp"] = str(min(float(body["max_temp"]), HARD_MAX_TEMP))
+    if "max_vrm_temp" in body:
+        body["max_vrm_temp"] = str(min(float(body["max_vrm_temp"]), HARD_MAX_VRM_TEMP))
     if "max_voltage" in body:
         body["max_voltage"] = str(min(int(body["max_voltage"]), HARD_MAX_VOLTAGE))
     if "max_freq" in body:

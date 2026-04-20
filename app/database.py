@@ -97,7 +97,9 @@ class Database:
                 );
 
                 INSERT OR IGNORE INTO settings VALUES ('max_temp',              '65');
+                INSERT OR IGNORE INTO settings VALUES ('max_vrm_temp',          '80');
                 INSERT OR IGNORE INTO settings VALUES ('max_voltage',           '1250');
+                INSERT OR IGNORE INTO settings VALUES ('max_freq',              '1000');
                 INSERT OR IGNORE INTO settings VALUES ('error_rate_threshold',  '1.0');
                 INSERT OR IGNORE INTO settings VALUES ('theme',                 'dark');
             """)

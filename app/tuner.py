@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 HARD_MAX_TEMP    = 80.0
 HARD_MAX_VOLTAGE = 1400
 HARD_MIN_FREQ    = 400
-HARD_MAX_FREQ    = 625   # conservative BM1370 ceiling
+HARD_MAX_FREQ    = 1100  # BM1370 ceiling
 
 # ── Step sizes ───────────────────────────────────────────────────────────────
 STEP_FREQ  = {"fast": 25, "slow": 25}   # MHz  (hardware rounds to nearest valid)
@@ -123,7 +123,7 @@ class TunerManager:
             "state":        s.state.value,
             "message":      s.message,
             "step_mode":    s.step_mode,
-            "restarting":   s.restarting,
+            "restarting":   False,
             "current_freq": s.current_freq,
             "current_voltage": s.current_voltage,
             "best_freq":    s.best_freq,
@@ -148,7 +148,6 @@ class TunerManager:
         s.start_time  = time.time()
         s.state       = TunerState.APPLYING
         s.message     = "Starting…"
-        s.time_limit_minutes = config.time_limit_minutes
         self._statuses[miner_id] = s
 
         asyncio.create_task(self._run(miner_id))
@@ -219,8 +218,9 @@ class TunerManager:
 
         cur_freq = cfg.baseline_freq
         cur_volt = cfg.baseline_voltage
-        backoff_count = 0          # consecutive back-offs → stop exploring upward
-        voltage_bumped = False     # did we already try bumping voltage?
+        backoff_count  = 0
+        voltage_bumped = False
+        first_iter     = True   # first pass: observe current state, no restart
 
         try:
             while True:
@@ -240,33 +240,30 @@ class TunerManager:
                 cur_volt = min(cur_volt, HARD_MAX_VOLTAGE,
                                min(cfg.max_voltage, HARD_MAX_VOLTAGE))
 
-                # ── APPLYING ─────────────────────────────────────────────────
-                s.state          = TunerState.APPLYING
-                s.restarting     = False
-                s.current_freq   = cur_freq
-                s.current_voltage = cur_volt
-                s.message        = f"Applying {cur_freq} MHz / {cur_volt} mV…"
+                if first_iter:
+                    # ── First pass: read actual current state, no changes at all
+                    first_iter = False
+                    live = await client.get_stats() or {}
+                    cur_freq = int(live.get("frequency",   cur_freq) or cur_freq)
+                    cur_volt = int(live.get("coreVoltage", cur_volt) or cur_volt)
+                    s.current_freq    = cur_freq
+                    s.current_voltage = cur_volt
+                    s.message = f"Observing current state: {cur_freq} MHz / {cur_volt} mV"
+                else:
+                    # ── APPLYING: push new settings via API only, no restart ───
+                    s.state           = TunerState.APPLYING
+                    s.current_freq    = cur_freq
+                    s.current_voltage = cur_volt
+                    s.message         = f"Applying {cur_freq} MHz / {cur_volt} mV…"
 
-                ok = await client.apply_settings(cur_freq, cur_volt)
-                if not ok:
-                    s.state   = TunerState.ERROR
-                    s.message = "Failed to apply settings to miner"
-                    break
+                    ok = await client.apply_settings(cur_freq, cur_volt)
+                    if not ok:
+                        s.state   = TunerState.ERROR
+                        s.message = "Failed to apply settings to miner"
+                        break
 
-                await asyncio.sleep(0.5)
-                await client.restart()
-
-                # ── RESTARTING ───────────────────────────────────────────────
-                s.state     = TunerState.RESTARTING
-                s.restarting = True
-                s.message   = "Restarting miner…"
-
-                online = await client.wait_for_online()
-                s.restarting = False
-                if not online:
-                    s.state   = TunerState.ERROR
-                    s.message = "Miner did not come back online after restart"
-                    break
+                    # Brief pause to let settings take effect
+                    await asyncio.sleep(2)
 
                 # ── OBSERVING ────────────────────────────────────────────────
                 stats_now = await client.get_stats() or {}
@@ -351,7 +348,7 @@ class TunerManager:
                 volt_step = STEP_VOLT[s.step_mode]
                 next_freq = cur_freq + freq_step
 
-                if next_freq <= HARD_MAX_FREQ and next_freq <= cfg.baseline_freq + 200:
+                if next_freq <= HARD_MAX_FREQ:
                     # More frequency headroom — go up
                     cur_freq  = next_freq
                     s.message = f"Stepping up → {cur_freq} MHz"
@@ -380,14 +377,12 @@ class TunerManager:
     async def _finalise(self, miner_id: int, client: MinerClient):
         s = self._statuses[miner_id]
 
-        # Apply best settings found
+        # Apply best settings found — no restart, saved to NVS
         if s.best_freq > 0:
             s.message = (
                 f"Applying best settings: {s.best_freq} MHz / {s.best_voltage} mV"
             )
             await client.apply_settings(s.best_freq, s.best_voltage)
-            await asyncio.sleep(0.5)
-            await client.restart()
 
         # Build human-readable summary
         cfg = s.config

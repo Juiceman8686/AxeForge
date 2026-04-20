@@ -46,13 +46,6 @@ async def _polling_loop():
             mid    = m["id"]
             client = MinerClient(m["ip"])
 
-            # Skip aggressive polling while miner is deliberately restarting
-            tuning = tuner_mgr.get_status(mid)
-            if tuning.get("restarting"):
-                live_cache[mid] = live_cache.get(mid, {"online": False, "stats": None, "last_save": 0.0})
-                live_cache[mid]["online"] = False
-                continue
-
             stats = await client.get_stats()
             prev  = live_cache.get(mid, {})
 

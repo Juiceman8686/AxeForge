@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from database import Database
 from miner_client import MinerClient
-from tuner import HARD_MAX_TEMP, HARD_MAX_VOLTAGE, TunerConfig, TunerManager
+from tuner import HARD_MAX_TEMP, HARD_MAX_VOLTAGE, HARD_MAX_FREQ, TunerConfig, TunerManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

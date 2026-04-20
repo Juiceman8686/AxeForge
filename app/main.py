@@ -133,7 +133,12 @@ async def list_miners():
     out    = []
     for m in miners:
         cache = live_cache.get(m["id"], {"online": False, "stats": None})
-        out.append({**m, "online": cache["online"], "stats": cache["stats"]})
+        out.append({
+            "miner":  m,
+            "online": cache["online"],
+            "stats":  cache["stats"],
+            "tuning": tuner_mgr.get_status(m["id"]),
+        })
     return out
 
 
@@ -156,7 +161,13 @@ async def add_miner(body: dict):
             )
 
     miner_id = db.add_miner(ip, nickname or ip)
-    return {"id": miner_id, "ip": ip, "nickname": nickname or ip}
+    miner = db.get_miner_by_id(miner_id)
+    return {
+        "miner":  miner,
+        "online": False,
+        "stats":  None,
+        "tuning": tuner_mgr.get_status(miner_id),
+    }
 
 
 @app.patch("/api/miners/{miner_id}")

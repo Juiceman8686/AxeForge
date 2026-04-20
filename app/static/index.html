@@ -680,7 +680,7 @@ function renderDashboard(){
   // Stop All visibility
   document.getElementById('stopAllBtn').classList.toggle('visible', tuningCount > 0);
 
-  // Miner cards
+  // Miner cards — always render, show offline state if not reachable
   document.getElementById('miners-grid').innerHTML = miners.map(m => minerCard(m)).join('');
 }
 
@@ -1130,6 +1130,8 @@ function fmtHR(v){
   return v.toFixed(1)+' GH/s';
 }
 function calcErrorRate(s){
+  if(!s) return 0;
+  if(s.errorPercentage != null) return s.errorPercentage;
   const acc = s.sharesAccepted || 0;
   const rej = s.sharesRejected || 0;
   const tot = acc + rej;

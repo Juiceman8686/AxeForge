@@ -210,6 +210,17 @@ class TunerStatus:
     best_error_rate: float = 0.0
     best_score:      float = -1.0
 
+    # Per-metric bests — independent of composite score, only on stable/marginal verdicts
+    best_hr_freq:    float = 0.0
+    best_hr_volt:    int   = 0
+    best_hr_value:   float = -1.0   # -1 = not yet recorded
+    best_temp_freq:  float = 0.0
+    best_temp_volt:  int   = 0
+    best_temp_value: float = -1.0
+    best_err_freq:   float = 0.0
+    best_err_volt:   int   = 0
+    best_err_value:  float = -1.0
+
     session_id:  Optional[int]        = None
     start_time:  Optional[float]      = None
     config:      Optional[TunerConfig] = None
@@ -420,17 +431,32 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
         pwr_stab = 0.88
 
     # ── 7. Composite stability multiplier ─────────────────────────────────────
-    # ASIC temp trend: most important safety signal
-    # Hashrate CV: ASIC health indicator
-    # VRM temp: independent thermal constraint
-    # Error rate: instability signal
-    # Power variance: supporting signal
+    # Weights have a safety floor for every component, then a priority bonus
+    # pool redistributes influence based on the user's priority ordering.
+    # "temp" priority bonus is split 60/40 between ASIC temp and VRM temp.
+    # All 6 priority permutations sum to exactly 1.0.
+    _w_hr  = 0.12
+    _w_tmp = 0.12
+    _w_vrm = 0.10
+    _w_err = 0.10
+    _w_pwr = 0.06
+    _bonus = {0: 0.30, 1: 0.15, 2: 0.05}
+    for _rank, _metric in enumerate(cfg.priority):
+        _b = _bonus[_rank]
+        if _metric == "hashrate":
+            _w_hr  += _b
+        elif _metric == "temp":
+            _w_tmp += _b * 0.60
+            _w_vrm += _b * 0.40
+        elif _metric == "error_rate":
+            _w_err += _b
+
     stability_mult = max(0.0, min(1.0,
-        0.28 * tmp_stab  +
-        0.27 * hr_stab   +
-        0.20 * vrm_stab  +
-        0.18 * err_stab  +
-        0.07 * pwr_stab
+        _w_tmp * tmp_stab +
+        _w_hr  * hr_stab  +
+        _w_vrm * vrm_stab +
+        _w_err * err_stab +
+        _w_pwr * pwr_stab
     ) * confidence)
 
     # ── 8. Performance score ──────────────────────────────────────────────────
@@ -525,6 +551,16 @@ class TunerManager:
             "best_error_rate":  round(s.best_error_rate, 3),
             "session_id":       s.session_id,
             "time_remaining_s": remaining,
+            # Per-metric bests (freq/volt that produced the best value for each metric)
+            "best_hr_freq":    round(s.best_hr_freq, 3)  if s.best_hr_value  >= 0 else None,
+            "best_hr_volt":    s.best_hr_volt             if s.best_hr_value  >= 0 else None,
+            "best_hr_value":   round(s.best_hr_value, 2) if s.best_hr_value  >= 0 else None,
+            "best_temp_freq":  round(s.best_temp_freq, 3)  if s.best_temp_value >= 0 else None,
+            "best_temp_volt":  s.best_temp_volt             if s.best_temp_value >= 0 else None,
+            "best_temp_value": round(s.best_temp_value, 1) if s.best_temp_value >= 0 else None,
+            "best_err_freq":   round(s.best_err_freq, 3)  if s.best_err_value  >= 0 else None,
+            "best_err_volt":   s.best_err_volt             if s.best_err_value  >= 0 else None,
+            "best_err_value":  round(s.best_err_value, 3) if s.best_err_value  >= 0 else None,
         }
 
     async def start_tuning(self, miner_id: int, config: TunerConfig) -> bool:
@@ -739,6 +775,22 @@ class TunerManager:
                     s.best_hashrate   = result.avg_hashrate
                     s.best_temp       = result.avg_temp
                     s.best_error_rate = result.avg_error_rate
+
+                # Per-metric bests — only on stable or marginal trials so we
+                # don't record a great number from an unstable operating point
+                if result.verdict in ("stable", "marginal"):
+                    if result.avg_hashrate > s.best_hr_value:
+                        s.best_hr_value = result.avg_hashrate
+                        s.best_hr_freq  = cur_freq
+                        s.best_hr_volt  = cur_volt
+                    if s.best_temp_value < 0 or result.avg_temp < s.best_temp_value:
+                        s.best_temp_value = result.avg_temp
+                        s.best_temp_freq  = cur_freq
+                        s.best_temp_volt  = cur_volt
+                    if s.best_err_value < 0 or result.avg_error_rate < s.best_err_value:
+                        s.best_err_value = result.avg_error_rate
+                        s.best_err_freq  = cur_freq
+                        s.best_err_volt  = cur_volt
 
                 step_entries = FREQ_FAST_STEP if s.step_mode == "fast" else FREQ_SLOW_STEP
 

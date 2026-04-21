@@ -153,6 +153,14 @@ main{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:24px 20p
 .card-actions{padding:10px 14px;display:flex;gap:8px;align-items:center;}
 .best-label{font-size:11px;color:var(--txt2);margin-left:auto;font-family:var(--font-mono);}
 
+.best-metrics{padding:6px 14px 10px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:3px;}
+.best-row{display:flex;align-items:baseline;gap:6px;font-size:11px;font-family:var(--font-mono);}
+.best-icon{font-size:10px;width:14px;flex-shrink:0;}
+.best-settings{color:var(--txt2);flex:1;}
+.best-val-hr{color:var(--accent);}
+.best-val-tmp{color:var(--ok);}
+.best-val-err{color:var(--info);}
+
 /* ── Modal backdrop ─────────────────────────────────────────────────── */
 .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);
   backdrop-filter:blur(4px);z-index:200;display:none;
@@ -741,8 +749,20 @@ function minerCard(m){
     ? ` · ${Math.ceil(t.time_remaining_s/60)}m left` : '';
   const tuningMsg = t.message ? `<span style="color:var(--txt2);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(t.message)}</span>` : '';
 
+  const fmtFreq = f => f != null ? Number(f).toFixed(3) : '—';
+  const fmtSet  = (f, v) => `${fmtFreq(f)} / ${v}mV`;
+
+  const bestHrRow   = t.best_hr_value  != null
+    ? `<div class="best-row"><span class="best-icon">⚡</span><span class="best-settings">HR &nbsp; ${fmtSet(t.best_hr_freq, t.best_hr_volt)}</span><span class="best-val-hr">${fmtHR(t.best_hr_value)} GH/s</span></div>` : '';
+  const bestTmpRow  = t.best_temp_value != null
+    ? `<div class="best-row"><span class="best-icon">🌡</span><span class="best-settings">Tmp  ${fmtSet(t.best_temp_freq, t.best_temp_volt)}</span><span class="best-val-tmp">${t.best_temp_value.toFixed(1)}°C</span></div>` : '';
+  const bestErrRow  = t.best_err_value  != null
+    ? `<div class="best-row"><span class="best-icon">⚠</span><span class="best-settings">Err  ${fmtSet(t.best_err_freq, t.best_err_volt)}</span><span class="best-val-err">${t.best_err_value.toFixed(3)}%</span></div>` : '';
+  const bestBlock   = (bestHrRow || bestTmpRow || bestErrRow)
+    ? `<div class="best-metrics">${bestHrRow}${bestTmpRow}${bestErrRow}</div>` : '';
+
   const bestLabel = t.best_freq
-    ? `Best: ${t.best_freq}MHz / ${t.best_voltage}mV` : '';
+    ? `Best: ${fmtFreq(t.best_freq)} / ${t.best_voltage}mV` : '';
 
   return `
   <div class="miner-card ${isActive?'tuning-active':''} ${!m.online&&!isRestarting?'offline':''}" id="card-${m.miner.id}">
@@ -793,6 +813,8 @@ function minerCard(m){
         ${timeLeft ? `<span style="font-size:11px;color:var(--txt2);flex-shrink:0">${timeLeft}</span>` : ''}
       </div>
     </div>
+
+    ${bestBlock}
 
     <div class="card-actions">
       ${!isActive

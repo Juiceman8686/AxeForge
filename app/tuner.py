@@ -170,6 +170,8 @@ class StabilityResult:
     peak_error_rate:    float
     error_trend:        float   # positive = worsening
     share_delta:        int
+    shares_accepted:    int     # accepted shares submitted during this window
+    shares_rejected:    int     # rejected shares submitted during this window
 
     # Power
     avg_power:          float
@@ -220,6 +222,8 @@ class TunerStatus:
     best_err_freq:   float = 0.0
     best_err_volt:   int   = 0
     best_err_value:  float = -1.0
+    best_err_shares_acc: int = 0
+    best_err_shares_rej: int = 0
 
     session_id:  Optional[int]        = None
     start_time:  Optional[float]      = None
@@ -517,6 +521,7 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
         vrm_temp_headroom=round(vrm_headroom,1),
         avg_error_rate=round(win_err,3), peak_error_rate=round(peak_err,3),
         error_trend=round(err_trend,3), share_delta=share_delta,
+        shares_accepted=acc_delta, shares_rejected=rej_delta,
         avg_power=round(avg_pwr,2), efficiency_gh_w=round(eff_gh_w,3),
         power_cv=round(cv_pwr,4),
         verdict=verdict, should_proceed=should_proceed,
@@ -558,9 +563,11 @@ class TunerManager:
             "best_temp_freq":  round(s.best_temp_freq, 3)  if s.best_temp_value >= 0 else None,
             "best_temp_volt":  s.best_temp_volt             if s.best_temp_value >= 0 else None,
             "best_temp_value": round(s.best_temp_value, 1) if s.best_temp_value >= 0 else None,
-            "best_err_freq":   round(s.best_err_freq, 3)  if s.best_err_value  >= 0 else None,
-            "best_err_volt":   s.best_err_volt             if s.best_err_value  >= 0 else None,
-            "best_err_value":  round(s.best_err_value, 3) if s.best_err_value  >= 0 else None,
+            "best_err_freq":       round(s.best_err_freq, 3)  if s.best_err_value >= 0 else None,
+            "best_err_volt":       s.best_err_volt             if s.best_err_value >= 0 else None,
+            "best_err_value":      round(s.best_err_value, 3) if s.best_err_value >= 0 else None,
+            "best_err_shares_acc": s.best_err_shares_acc       if s.best_err_value >= 0 else None,
+            "best_err_shares_rej": s.best_err_shares_rej       if s.best_err_value >= 0 else None,
         }
 
     async def start_tuning(self, miner_id: int, config: TunerConfig) -> bool:
@@ -788,9 +795,11 @@ class TunerManager:
                         s.best_temp_freq  = cur_freq
                         s.best_temp_volt  = cur_volt
                     if s.best_err_value < 0 or result.avg_error_rate < s.best_err_value:
-                        s.best_err_value = result.avg_error_rate
-                        s.best_err_freq  = cur_freq
-                        s.best_err_volt  = cur_volt
+                        s.best_err_value      = result.avg_error_rate
+                        s.best_err_freq       = cur_freq
+                        s.best_err_volt       = cur_volt
+                        s.best_err_shares_acc = result.shares_accepted
+                        s.best_err_shares_rej = result.shares_rejected
 
                 step_entries = FREQ_FAST_STEP if s.step_mode == "fast" else FREQ_SLOW_STEP
 

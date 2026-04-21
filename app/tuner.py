@@ -15,6 +15,7 @@ Stability scoring considers:
 """
 
 import asyncio
+import bisect
 import logging
 import math
 import time
@@ -35,9 +36,70 @@ HARD_MAX_VOLTAGE  = 1400
 HARD_MIN_FREQ     = 400
 HARD_MAX_FREQ     = 1100
 
-# ── Step sizes ────────────────────────────────────────────────────────────────
-STEP_FREQ = {"fast": 25, "slow": 25}   # MHz
-STEP_VOLT = {"fast": 50, "slow": 25}   # mV
+# ── Voltage step sizes ────────────────────────────────────────────────────────
+STEP_VOLT = {"fast": 20, "slow": 10}   # mV
+
+# ── BM1370 hardware frequency table ──────────────────────────────────────────
+# Valid frequencies are 25*N/D MHz for D ∈ {1,2,3,4,6,8}.
+# D=4 and D=8 are only valid up to 737.5 MHz (hardware PLL limit); above that
+# only D ∈ {1,2,3,6} produce valid register values, giving ~4.17 MHz spacing.
+def _build_freq_table() -> List[float]:
+    seen: set = set()
+    for d in [1, 2, 3, 4, 6, 8]:
+        n_min = math.ceil(HARD_MIN_FREQ * d / 25)
+        n_max = math.floor(HARD_MAX_FREQ * d / 25)
+        for n in range(n_min, n_max + 1):
+            f = round(25.0 * n / d, 6)
+            if f < HARD_MIN_FREQ or f > HARD_MAX_FREQ:
+                continue
+            if d in (4, 8) and f > 737.5 + 1e-9:
+                continue
+            seen.add(f)
+    return sorted(seen)
+
+BM1370_FREQ_TABLE: List[float] = _build_freq_table()
+
+# How many table entries to skip per step in each mode
+FREQ_FAST_STEP = 6   # ≈ 12.5 MHz per step during initial discovery
+FREQ_SLOW_STEP = 1   # single hardware step (~1–4 MHz) for precision tuning
+
+
+def _freq_snap(f: float) -> float:
+    """Return the nearest valid BM1370 frequency to f."""
+    if not BM1370_FREQ_TABLE:
+        return f
+    idx = bisect.bisect_left(BM1370_FREQ_TABLE, f)
+    if idx == 0:
+        return BM1370_FREQ_TABLE[0]
+    if idx >= len(BM1370_FREQ_TABLE):
+        return BM1370_FREQ_TABLE[-1]
+    lo, hi = BM1370_FREQ_TABLE[idx - 1], BM1370_FREQ_TABLE[idx]
+    return hi if (hi - f) < (f - lo) else lo
+
+
+def _freq_idx(f: float) -> int:
+    """Return the table index of the nearest entry to f."""
+    snapped = _freq_snap(f)
+    idx = bisect.bisect_left(BM1370_FREQ_TABLE, snapped)
+    # bisect may land on the exact value or one past it
+    if idx < len(BM1370_FREQ_TABLE) and abs(BM1370_FREQ_TABLE[idx] - snapped) < 0.001:
+        return idx
+    if idx > 0 and abs(BM1370_FREQ_TABLE[idx - 1] - snapped) < 0.001:
+        return idx - 1
+    return max(0, min(idx, len(BM1370_FREQ_TABLE) - 1))
+
+
+def _freq_next(f: float, steps: int = 1) -> Optional[float]:
+    """Return the frequency `steps` table entries above f, or None if at/past ceiling."""
+    new_idx = _freq_idx(f) + steps
+    if new_idx >= len(BM1370_FREQ_TABLE):
+        return None
+    return BM1370_FREQ_TABLE[new_idx]
+
+
+def _freq_prev(f: float, steps: int = 1) -> float:
+    """Return the frequency `steps` table entries below f (clamped to HARD_MIN_FREQ)."""
+    return BM1370_FREQ_TABLE[max(0, _freq_idx(f) - steps)]
 
 # ── Observation windows by primary priority (seconds) ─────────────────────────
 OBS_WINDOW = {"hashrate": 60, "temp": 120, "error_rate": 45}
@@ -73,10 +135,10 @@ class TunerConfig:
     max_temp:           float
     max_vrm_temp:       float
     max_voltage:        int
-    max_freq:           int
+    max_freq:           float
     error_threshold:    float
     time_limit_minutes: Optional[int]
-    baseline_freq:      int
+    baseline_freq:      float
     baseline_voltage:   int
 
 
@@ -139,9 +201,9 @@ class TunerStatus:
     step_mode:    str        = "slow"
     restarting:   bool       = False
 
-    current_freq:    int   = 0
+    current_freq:    float = 0.0
     current_voltage: int   = 0
-    best_freq:       int   = 0
+    best_freq:       float = 0.0
     best_voltage:    int   = 0
     best_hashrate:   float = 0.0
     best_temp:       float = 0.0
@@ -547,11 +609,10 @@ class TunerManager:
             cfg.step_mode, cfg.baseline_freq, cfg.baseline_voltage,
         )
         s.session_id   = session_id
-        cur_freq       = cfg.baseline_freq
+        cur_freq       = _freq_snap(float(cfg.baseline_freq))
         cur_volt       = cfg.baseline_voltage
         backoff_count  = 0
         marginal_count = 0
-        voltage_bumped = False
         first_iter     = True
 
         try:
@@ -564,24 +625,25 @@ class TunerManager:
                     s.message = "Stopped by user"
                     break
 
-                eff_ceil_freq = min(cfg.max_freq, HARD_MAX_FREQ)
-                cur_freq = max(HARD_MIN_FREQ, min(cur_freq, eff_ceil_freq))
+                eff_ceil_freq = float(min(cfg.max_freq, HARD_MAX_FREQ))
+                cur_freq = _freq_snap(max(float(HARD_MIN_FREQ), min(cur_freq, eff_ceil_freq)))
                 cur_volt = min(cur_volt, HARD_MAX_VOLTAGE,
                                min(cfg.max_voltage, HARD_MAX_VOLTAGE))
 
                 if first_iter:
                     first_iter = False
                     live = await client.get_stats() or {}
-                    cur_freq = int(live.get("frequency",   cur_freq) or cur_freq)
-                    cur_volt = int(live.get("coreVoltage", cur_volt) or cur_volt)
+                    live_freq = float(live.get("frequency",   cur_freq) or cur_freq)
+                    cur_freq  = _freq_snap(live_freq)
+                    cur_volt  = int(live.get("coreVoltage", cur_volt) or cur_volt)
                     s.current_freq    = cur_freq
                     s.current_voltage = cur_volt
-                    s.message = f"Observing current state: {cur_freq} MHz / {cur_volt} mV"
+                    s.message = f"Observing current state: {cur_freq:.3f} MHz / {cur_volt} mV"
                 else:
                     s.state           = TunerState.APPLYING
                     s.current_freq    = cur_freq
                     s.current_voltage = cur_volt
-                    s.message         = f"Applying {cur_freq} MHz / {cur_volt} mV…"
+                    s.message         = f"Applying {cur_freq:.3f} MHz / {cur_volt} mV…"
                     ok = await client.apply_settings(cur_freq, cur_volt)
                     if not ok:
                         s.state   = TunerState.ERROR
@@ -618,7 +680,7 @@ class TunerManager:
                 obs_secs = OBS_WINDOW.get(cfg.priority[0], 60)
                 s.obs_window_secs = obs_secs
                 s.state   = TunerState.OBSERVING
-                s.message = f"Observing {cur_freq} MHz / {cur_volt} mV ({obs_secs}s)…"
+                s.message = f"Observing {cur_freq:.3f} MHz / {cur_volt} mV ({obs_secs}s)…"
 
                 # Use an event so stop requests interrupt immediately
                 stop_event = asyncio.Event()
@@ -639,8 +701,8 @@ class TunerManager:
                 if s._safety_breach:
                     s.state = TunerState.SAFETY_BACKOFF
                     backoff_count += 1
-                    cur_freq = max(HARD_MIN_FREQ,
-                                   cur_freq - STEP_FREQ[s.step_mode] * 2)
+                    step_entries = FREQ_FAST_STEP if s.step_mode == "fast" else FREQ_SLOW_STEP
+                    cur_freq = _freq_prev(cur_freq, step_entries * 2)
                     if backoff_count >= 3:
                         s.message = "Stable limit reached after repeated safety back-offs"
                         break
@@ -678,22 +740,22 @@ class TunerManager:
                     s.best_temp       = result.avg_temp
                     s.best_error_rate = result.avg_error_rate
 
-                # Handle backoff
+                step_entries = FREQ_FAST_STEP if s.step_mode == "fast" else FREQ_SLOW_STEP
+
+                # Handle backoff — use table-based steps for precise navigation
                 if result.backoff_steps > 0:
-                    cur_freq = max(HARD_MIN_FREQ,
-                                   cur_freq - STEP_FREQ[s.step_mode] * result.backoff_steps)
+                    cur_freq = _freq_prev(cur_freq, step_entries * result.backoff_steps)
                     backoff_count += 1
                     if backoff_count >= 3:
                         if cfg.time_limit_minutes:
                             s.message = "Stable limit reached after repeated back-offs"
                             break
-                        # No time limit — reset counters and re-observe at best known frequency
+                        # No time limit — reset and re-observe at best known frequency
                         backoff_count  = 0
                         marginal_count = 0
-                        voltage_bumped = False
-                        cur_freq = s.best_freq if s.best_freq > 0 else cur_freq
+                        cur_freq = s.best_freq if s.best_freq > 0.0 else cur_freq
                         cur_volt = s.best_voltage if s.best_voltage > 0 else cur_volt
-                        s.message = f"Re-validating best settings: {cur_freq} MHz / {cur_volt} mV"
+                        s.message = f"Re-validating best settings: {cur_freq:.3f} MHz / {cur_volt} mV"
                     continue
 
                 backoff_count = 0
@@ -707,8 +769,8 @@ class TunerManager:
                             break
                         # No time limit — drop one step to find genuinely stable point
                         marginal_count = 0
-                        cur_freq = max(HARD_MIN_FREQ, cur_freq - STEP_FREQ[s.step_mode])
-                        s.message = f"Marginal stability — stepping down → {cur_freq} MHz"
+                        cur_freq = _freq_prev(cur_freq, step_entries)
+                        s.message = f"Marginal stability — stepping down → {cur_freq:.3f} MHz"
                     continue
 
                 marginal_count = 0
@@ -723,30 +785,33 @@ class TunerManager:
                         cur_volt >= eff_max_volt * NEAR_LIMIT_FRACTION or
                         cur_freq >= eff_ceil_freq * NEAR_LIMIT_FRACTION):
                     s.step_mode = "slow"
+                    step_entries = FREQ_SLOW_STEP  # recalc after mode switch
 
-                freq_step = STEP_FREQ[s.step_mode]
                 volt_step = STEP_VOLT[s.step_mode]
-                next_freq = cur_freq + freq_step
+                next_freq = _freq_next(cur_freq, step_entries)
 
-                if result.should_proceed and next_freq <= eff_ceil_freq:
+                if result.should_proceed and next_freq is not None and next_freq <= eff_ceil_freq:
+                    # Stable — step up to next valid hardware frequency
                     cur_freq  = next_freq
-                    s.message = f"Stable ✓ stepping up → {cur_freq} MHz"
-                elif (not voltage_bumped and
-                      cur_volt + volt_step <= min(cfg.max_voltage, HARD_MAX_VOLTAGE)):
-                    cur_volt      += volt_step
-                    voltage_bumped = True
-                    cur_freq = min(s.best_freq + freq_step, eff_ceil_freq)
-                    s.message = f"Voltage bump → {cur_volt} mV, retrying {cur_freq} MHz"
+                    s.message = f"Stable ✓ stepping up → {cur_freq:.3f} MHz"
+                elif cur_volt + volt_step <= eff_max_volt:
+                    # Frequency ceiling reached at this voltage — bump voltage and re-explore
+                    cur_volt += volt_step
+                    restart = _freq_next(s.best_freq if s.best_freq > 0.0 else cur_freq,
+                                         step_entries)
+                    cur_freq = min(restart, eff_ceil_freq) if restart is not None else cur_freq
+                    s.message = (f"Voltage bump → {cur_volt} mV, "
+                                 f"exploring from {cur_freq:.3f} MHz")
                 else:
+                    # Both frequency and voltage ceilings hit
                     if cfg.time_limit_minutes:
                         s.message = "Parameter space fully explored"
                         break
-                    # No time limit — re-validate best settings continuously so the
-                    # tuner adapts to ambient temperature changes throughout the day
-                    voltage_bumped = False
-                    cur_freq = s.best_freq if s.best_freq > 0 else cur_freq
+                    # No time limit — re-validate best settings continuously
+                    cur_freq = s.best_freq if s.best_freq > 0.0 else cur_freq
                     cur_volt = s.best_voltage if s.best_voltage > 0 else cur_volt
-                    s.message = f"Continuous mode — re-validating {cur_freq} MHz / {cur_volt} mV"
+                    s.message = (f"Continuous mode — re-validating "
+                                 f"{cur_freq:.3f} MHz / {cur_volt} mV")
 
         except asyncio.CancelledError:
             s.message = "Tuning task cancelled"

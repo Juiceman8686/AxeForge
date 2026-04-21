@@ -27,7 +27,7 @@ class MinerClient:
             pass
         return None
 
-    async def apply_settings(self, frequency: int, voltage: int) -> bool:
+    async def apply_settings(self, frequency: float, voltage: int) -> bool:
         """PATCH new freq/voltage to the miner."""
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT) as c:

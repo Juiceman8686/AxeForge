@@ -222,8 +222,6 @@ class TunerStatus:
     best_err_freq:   float = 0.0
     best_err_volt:   int   = 0
     best_err_value:  float = -1.0
-    best_err_shares_acc: int = 0
-    best_err_shares_rej: int = 0
 
     session_id:  Optional[int]        = None
     start_time:  Optional[float]      = None
@@ -272,10 +270,9 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
     acc_delta   = max(0, s.obs_shares_acc_end - s.obs_shares_acc_start)
     rej_delta   = max(0, s.obs_shares_rej_end - s.obs_shares_rej_start)
     share_delta = acc_delta + rej_delta
-    err_conf    = 1.0
-    if share_delta < MIN_SHARES_TRUST:
-        err_conf = max(0.3, share_delta / MIN_SHARES_TRUST)
-        reasons.append(f"Only {share_delta} shares submitted — error rate estimate low confidence")
+    # Share counts kept for reference only — error rate is sourced from the
+    # chip's own errorPercentage, which is based on millions of internal hash
+    # operations and is always statistically meaningful regardless of share count.
 
     # ── 2. Hashrate analysis ──────────────────────────────────────────────────
     avg_hr   = _mean(hrs)
@@ -387,10 +384,10 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
             vrm_stab = min(1.0, vrm_stab * (1.0 + 0.15 * fan_headroom))
 
     # ── 5. Error rate analysis ────────────────────────────────────────────────
-    if share_delta >= MIN_SHARES_TRUST:
-        win_err = (rej_delta / share_delta * 100.0) if share_delta > 0 else 0.0
-    else:
-        win_err = _mean(errs)
+    # Use the chip's own errorPercentage as the primary signal. It reflects
+    # hardware-level computation errors inside the BM1370 at the current
+    # frequency/voltage, sampled every second across the full window.
+    win_err = _mean(errs)
 
     peak_err  = max(errs) if errs else 0.0
     err_trend = _trend_abs(errs)
@@ -419,8 +416,6 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
     if err_trend > 0.5:
         err_stab *= 0.75
         reasons.append("Error rate trending upward during window")
-
-    err_stab = err_stab * err_conf
 
     # ── 6. Power analysis ─────────────────────────────────────────────────────
     avg_pwr  = _mean(pwrs)
@@ -563,11 +558,9 @@ class TunerManager:
             "best_temp_freq":  round(s.best_temp_freq, 3)  if s.best_temp_value >= 0 else None,
             "best_temp_volt":  s.best_temp_volt             if s.best_temp_value >= 0 else None,
             "best_temp_value": round(s.best_temp_value, 1) if s.best_temp_value >= 0 else None,
-            "best_err_freq":       round(s.best_err_freq, 3)  if s.best_err_value >= 0 else None,
-            "best_err_volt":       s.best_err_volt             if s.best_err_value >= 0 else None,
-            "best_err_value":      round(s.best_err_value, 3) if s.best_err_value >= 0 else None,
-            "best_err_shares_acc": s.best_err_shares_acc       if s.best_err_value >= 0 else None,
-            "best_err_shares_rej": s.best_err_shares_rej       if s.best_err_value >= 0 else None,
+            "best_err_freq":  round(s.best_err_freq, 3)  if s.best_err_value >= 0 else None,
+            "best_err_volt":  s.best_err_volt             if s.best_err_value >= 0 else None,
+            "best_err_value": round(s.best_err_value, 3) if s.best_err_value >= 0 else None,
         }
 
     async def start_tuning(self, miner_id: int, config: TunerConfig) -> bool:
@@ -795,11 +788,9 @@ class TunerManager:
                         s.best_temp_freq  = cur_freq
                         s.best_temp_volt  = cur_volt
                     if s.best_err_value < 0 or result.avg_error_rate < s.best_err_value:
-                        s.best_err_value      = result.avg_error_rate
-                        s.best_err_freq       = cur_freq
-                        s.best_err_volt       = cur_volt
-                        s.best_err_shares_acc = result.shares_accepted
-                        s.best_err_shares_rej = result.shares_rejected
+                        s.best_err_value = result.avg_error_rate
+                        s.best_err_freq  = cur_freq
+                        s.best_err_volt  = cur_volt
 
                 step_entries = FREQ_FAST_STEP if s.step_mode == "fast" else FREQ_SLOW_STEP
 

@@ -757,7 +757,7 @@ function minerCard(m){
   const bestTmpRow  = t.best_temp_value != null
     ? `<div class="best-row"><span class="best-icon">🌡</span><span class="best-settings">Tmp  ${fmtSet(t.best_temp_freq, t.best_temp_volt)}</span><span class="best-val-tmp">${t.best_temp_value.toFixed(1)}°C</span></div>` : '';
   const bestErrRow  = t.best_err_value  != null
-    ? `<div class="best-row"><span class="best-icon">⚠</span><span class="best-settings">Err  ${fmtSet(t.best_err_freq, t.best_err_volt)}</span><span class="best-val-err">${t.best_err_value.toFixed(3)}% &nbsp;<span style="color:var(--txt2);font-size:10px">${t.best_err_shares_acc??0}✓ ${t.best_err_shares_rej??0}✗</span></span></div>` : '';
+    ? `<div class="best-row"><span class="best-icon">⚠</span><span class="best-settings">Err  ${fmtSet(t.best_err_freq, t.best_err_volt)}</span><span class="best-val-err">${t.best_err_value.toFixed(3)}%</span></div>` : '';
   const bestBlock   = (bestHrRow || bestTmpRow || bestErrRow)
     ? `<div class="best-metrics">${bestHrRow}${bestTmpRow}${bestErrRow}</div>` : '';
 

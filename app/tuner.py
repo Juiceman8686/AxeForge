@@ -644,12 +644,13 @@ class TunerManager:
             miner_id, session_name, ",".join(cfg.priority),
             cfg.step_mode, cfg.baseline_freq, cfg.baseline_voltage,
         )
-        s.session_id   = session_id
-        cur_freq       = _freq_snap(float(cfg.baseline_freq))
-        cur_volt       = cfg.baseline_voltage
-        backoff_count  = 0
-        marginal_count = 0
-        first_iter     = True
+        s.session_id      = session_id
+        cur_freq          = _freq_snap(float(cfg.baseline_freq))
+        cur_volt          = cfg.baseline_voltage
+        backoff_count     = 0
+        marginal_count    = 0
+        err_volt_bumped   = False   # True after a volt bump tried for error instability at cur_freq
+        first_iter        = True
 
         try:
             while True:
@@ -793,18 +794,39 @@ class TunerManager:
                         s.best_err_volt  = cur_volt
 
                 step_entries = FREQ_FAST_STEP if s.step_mode == "fast" else FREQ_SLOW_STEP
+                eff_max_volt = min(cfg.max_voltage, HARD_MAX_VOLTAGE)
+                volt_step    = STEP_VOLT[s.step_mode]
 
-                # Handle backoff — use table-based steps for precise navigation
+                # Handle backoff
                 if result.backoff_steps > 0:
+                    # Before retreating on frequency, check whether a small voltage bump
+                    # might stabilise the ASIC at the current clock.  Only attempt this
+                    # when: error rate is the primary instability signal (chip errors
+                    # elevated, thermals still have headroom), voltage can go higher, and
+                    # we haven't already tried a volt bump at this exact frequency.
+                    err_primary = (
+                        result.avg_error_rate > cfg.error_threshold * 0.5 and
+                        result.avg_temp < min(cfg.max_temp, HARD_MAX_TEMP) * 0.85
+                    )
+                    if (err_primary and not err_volt_bumped
+                            and cur_volt + volt_step <= eff_max_volt):
+                        cur_volt       += volt_step
+                        err_volt_bumped = True
+                        s.message = (f"Error instability — volt bump → {cur_volt} mV "
+                                     f"at {cur_freq:.3f} MHz before backing off")
+                        continue
+
+                    # Voltage bump either already tried or not applicable — back off frequency
+                    err_volt_bumped = False
                     cur_freq = _freq_prev(cur_freq, step_entries * result.backoff_steps)
                     backoff_count += 1
                     if backoff_count >= 3:
-                        if cfg.time_limit_minutes:
-                            s.message = "Stable limit reached after repeated back-offs"
-                            break
-                        # No time limit — reset and re-observe at best known frequency
+                        # Reset and re-validate at best known settings.
+                        # Applies whether a time limit is set or not — the time check at
+                        # the top of the loop is the only thing that ends a timed session.
                         backoff_count  = 0
                         marginal_count = 0
+                        err_volt_bumped = False
                         cur_freq = s.best_freq if s.best_freq > 0.0 else cur_freq
                         cur_volt = s.best_voltage if s.best_voltage > 0 else cur_volt
                         s.message = f"Re-validating best settings: {cur_freq:.3f} MHz / {cur_volt} mV"
@@ -816,54 +838,50 @@ class TunerManager:
                 if result.verdict == "marginal":
                     marginal_count += 1
                     if marginal_count >= 2:
-                        if cfg.time_limit_minutes:
-                            s.message = "Stable ceiling found (consistent marginal stability)"
-                            break
-                        # No time limit — drop one step to find genuinely stable point
-                        marginal_count = 0
+                        # Step down to find a genuinely stable point and keep tuning.
+                        # Applies whether a time limit is set or not.
+                        marginal_count  = 0
+                        err_volt_bumped = False
                         cur_freq = _freq_prev(cur_freq, step_entries)
                         s.message = f"Marginal stability — stepping down → {cur_freq:.3f} MHz"
                     continue
 
-                marginal_count = 0
+                marginal_count  = 0
+                err_volt_bumped = False   # stable verdict — reset for next frequency
 
                 # Auto-switch to slow near ceilings
-                eff_max_volt = min(cfg.max_voltage, HARD_MAX_VOLTAGE)
-                eff_max_vrm  = min(cfg.max_vrm_temp, HARD_MAX_VRM_TEMP)
-                avg_vrm_now  = _mean(s.obs_vrm_temps) if s.obs_vrm_temps else 0
+                eff_max_vrm = min(cfg.max_vrm_temp, HARD_MAX_VRM_TEMP)
+                avg_vrm_now = _mean(s.obs_vrm_temps) if s.obs_vrm_temps else 0
                 if (result.avg_temp >= min(cfg.max_temp, HARD_MAX_TEMP) * NEAR_LIMIT_FRACTION or
                         (avg_vrm_now > 0 and avg_vrm_now >= eff_max_vrm * NEAR_LIMIT_FRACTION) or
                         result.avg_error_rate >= cfg.error_threshold * (NEAR_LIMIT_FRACTION - 0.1) or
                         cur_volt >= eff_max_volt * NEAR_LIMIT_FRACTION or
                         cur_freq >= eff_ceil_freq * NEAR_LIMIT_FRACTION):
-                    s.step_mode = "slow"
-                    step_entries = FREQ_SLOW_STEP  # recalc after mode switch
+                    s.step_mode  = "slow"
+                    step_entries = FREQ_SLOW_STEP
+                    volt_step    = STEP_VOLT["slow"]
 
-                volt_step = STEP_VOLT[s.step_mode]
                 next_freq = _freq_next(cur_freq, step_entries)
 
                 if result.should_proceed and next_freq is not None and next_freq <= eff_ceil_freq:
                     # Stable — step up to next valid hardware frequency
-                    cur_freq  = next_freq
+                    cur_freq = next_freq
                     s.message = f"Stable ✓ stepping up → {cur_freq:.3f} MHz"
                 elif cur_volt + volt_step <= eff_max_volt:
-                    # Frequency ceiling reached at this voltage — bump voltage and re-explore
+                    # Frequency ceiling at this voltage — bump voltage and re-explore
                     cur_volt += volt_step
-                    restart = _freq_next(s.best_freq if s.best_freq > 0.0 else cur_freq,
-                                         step_entries)
-                    cur_freq = min(restart, eff_ceil_freq) if restart is not None else cur_freq
+                    restart   = _freq_next(s.best_freq if s.best_freq > 0.0 else cur_freq,
+                                           step_entries)
+                    cur_freq  = min(restart, eff_ceil_freq) if restart is not None else cur_freq
                     s.message = (f"Voltage bump → {cur_volt} mV, "
                                  f"exploring from {cur_freq:.3f} MHz")
                 else:
-                    # Both frequency and voltage ceilings hit
-                    if cfg.time_limit_minutes:
-                        s.message = "Parameter space fully explored"
-                        break
-                    # No time limit — re-validate best settings continuously
+                    # Both frequency and voltage ceilings hit — re-validate best settings.
+                    # The time check at the top of the loop ends timed sessions;
+                    # unlimited sessions loop here indefinitely to adapt to conditions.
                     cur_freq = s.best_freq if s.best_freq > 0.0 else cur_freq
                     cur_volt = s.best_voltage if s.best_voltage > 0 else cur_volt
-                    s.message = (f"Continuous mode — re-validating "
-                                 f"{cur_freq:.3f} MHz / {cur_volt} mV")
+                    s.message = (f"Re-validating best: {cur_freq:.3f} MHz / {cur_volt} mV")
 
         except asyncio.CancelledError:
             s.message = "Tuning task cancelled"

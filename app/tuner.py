@@ -159,6 +159,7 @@ class TunerStatus:
     obs_vrm_temps:      List[float] = field(default_factory=list)
     obs_error_pcts:     List[float] = field(default_factory=list)
     obs_powers:         List[float] = field(default_factory=list)
+    obs_fanspeeds:      List[float] = field(default_factory=list)
     obs_shares_acc_start: int = 0
     obs_shares_rej_start: int = 0
     obs_shares_acc_end:   int = 0
@@ -291,6 +292,22 @@ def analyze_stability(s: TunerStatus, cfg: TunerConfig) -> StabilityResult:
         reasons.append(f"VRM temp trending up (+{vrm_trend:.1f}°C)")
     elif vrm_trend >= TEMP_TREND_FINE:
         vrm_stab *= 0.88
+
+    # ── 4b. Fan speed headroom modifier ──────────────────────────────────────
+    # If the fan has room to spin up further and VRM temps aren't rising, the
+    # thermal situation has real headroom — soften the VRM penalty slightly.
+    # If the fan IS increasing but VRM temps are still climbing, the fan can't
+    # keep up: treat that as full-weight (no bonus applied).
+    fan_speeds = s.obs_fanspeeds
+    if fan_speeds:
+        avg_fan = _mean(fan_speeds)
+        fan_trend = _trend_abs(fan_speeds)
+        fan_headroom = max(0.0, (100.0 - avg_fan) / 100.0)  # 0 at 100%, 1 at 0%
+        # Only apply the bonus when the fan isn't spinning up to compensate
+        fan_compensating = fan_trend > 5.0 and vrm_trend > TEMP_TREND_FINE
+        if not fan_compensating and avg_vrm > 0 and fan_headroom > 0.15:
+            # Soft upward modifier: up to +15% on vrm_stab, capped at 1.0
+            vrm_stab = min(1.0, vrm_stab * (1.0 + 0.15 * fan_headroom))
 
     # ── 5. Error rate analysis ────────────────────────────────────────────────
     if share_delta >= MIN_SHARES_TRUST:
@@ -485,6 +502,7 @@ class TunerManager:
                                    stats.get("boardtemp1",     0) or 0)
         s.obs_error_pcts.append(  stats.get("errorPercentage", 0) or 0)
         s.obs_powers.append(      stats.get("power",           0) or 0)
+        s.obs_fanspeeds.append(   stats.get("fanspeed",        0) or 0)
         s.obs_shares_acc_end = stats.get("sharesAccepted", s.obs_shares_acc_start)
         s.obs_shares_rej_end = stats.get("sharesRejected", s.obs_shares_rej_start)
 
@@ -569,7 +587,18 @@ class TunerManager:
                         s.state   = TunerState.ERROR
                         s.message = "Failed to apply settings to miner"
                         break
-                    await asyncio.sleep(2)
+                    # Interruptible 2-second settle so stop requests aren't delayed
+                    settle_event = asyncio.Event()
+                    s._stop_event = settle_event
+                    try:
+                        await asyncio.wait_for(settle_event.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        pass
+                    finally:
+                        s._stop_event = None
+                    if s._stop_requested:
+                        s.message = "Stopped by user"
+                        break
 
                 # Snapshot share counts at start of observation window
                 stats_now = await client.get_stats() or {}
@@ -580,8 +609,10 @@ class TunerManager:
                 s.obs_hashrates    = []
                 s.obs_hashrates_1m = []
                 s.obs_temps        = []
+                s.obs_vrm_temps    = []
                 s.obs_error_pcts   = []
                 s.obs_powers       = []
+                s.obs_fanspeeds    = []
                 s._safety_breach   = False
 
                 obs_secs = OBS_WINDOW.get(cfg.priority[0], 60)
@@ -653,8 +684,16 @@ class TunerManager:
                                    cur_freq - STEP_FREQ[s.step_mode] * result.backoff_steps)
                     backoff_count += 1
                     if backoff_count >= 3:
-                        s.message = "Stable limit reached after repeated back-offs"
-                        break
+                        if cfg.time_limit_minutes:
+                            s.message = "Stable limit reached after repeated back-offs"
+                            break
+                        # No time limit — reset counters and re-observe at best known frequency
+                        backoff_count  = 0
+                        marginal_count = 0
+                        voltage_bumped = False
+                        cur_freq = s.best_freq if s.best_freq > 0 else cur_freq
+                        cur_volt = s.best_voltage if s.best_voltage > 0 else cur_volt
+                        s.message = f"Re-validating best settings: {cur_freq} MHz / {cur_volt} mV"
                     continue
 
                 backoff_count = 0
@@ -663,8 +702,13 @@ class TunerManager:
                 if result.verdict == "marginal":
                     marginal_count += 1
                     if marginal_count >= 2:
-                        s.message = "Stable ceiling found (consistent marginal stability)"
-                        break
+                        if cfg.time_limit_minutes:
+                            s.message = "Stable ceiling found (consistent marginal stability)"
+                            break
+                        # No time limit — drop one step to find genuinely stable point
+                        marginal_count = 0
+                        cur_freq = max(HARD_MIN_FREQ, cur_freq - STEP_FREQ[s.step_mode])
+                        s.message = f"Marginal stability — stepping down → {cur_freq} MHz"
                     continue
 
                 marginal_count = 0
@@ -694,8 +738,15 @@ class TunerManager:
                     cur_freq = min(s.best_freq + freq_step, eff_ceil_freq)
                     s.message = f"Voltage bump → {cur_volt} mV, retrying {cur_freq} MHz"
                 else:
-                    s.message = "Parameter space fully explored"
-                    break
+                    if cfg.time_limit_minutes:
+                        s.message = "Parameter space fully explored"
+                        break
+                    # No time limit — re-validate best settings continuously so the
+                    # tuner adapts to ambient temperature changes throughout the day
+                    voltage_bumped = False
+                    cur_freq = s.best_freq if s.best_freq > 0 else cur_freq
+                    cur_volt = s.best_voltage if s.best_voltage > 0 else cur_volt
+                    s.message = f"Continuous mode — re-validating {cur_freq} MHz / {cur_volt} mV"
 
         except asyncio.CancelledError:
             s.message = "Tuning task cancelled"

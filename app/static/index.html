@@ -712,7 +712,10 @@ function minerCard(m){
   const s   = m.stats || {};
   const t   = m.tuning || {};
   const tState = t.state || 'idle';
-  const isActive = !['idle','complete','error'].includes(tState);
+  // Treat as inactive immediately after stop is clicked, before WS confirms
+  const isStopping = _stoppingIds.has(m.miner.id);
+  if(isStopping && ['idle','complete','error'].includes(tState)) _stoppingIds.delete(m.miner.id);
+  const isActive = !isStopping && !['idle','complete','error'].includes(tState);
   const isRestarting = t.restarting;
   const dotClass = !m.online ? (isRestarting ? 'restarting' : 'offline') : 'online';
 
@@ -761,7 +764,7 @@ function minerCard(m){
         <div class="metric-bar"><div class="metric-fill" style="width:${hrPct}%;background:var(--accent)"></div></div>
       </div>
       <div class="metric-cell">
-        <div class="metric-label">Temp</div>
+        <div class="metric-label">ASIC Temp</div>
         <div class="metric-value" style="color:${tempCol(s.temp||0)}">${s.temp ? s.temp.toFixed(1) : '—'}</div>
         <div class="metric-unit">°C</div>
         <div class="metric-bar"><div class="metric-fill" style="width:${tmpPct}%;background:${tempCol(s.temp||0)}"></div></div>
@@ -931,9 +934,19 @@ async function submitTuning(){
   }catch(e){ toast('Could not start tuning: '+e.message,'err'); }
 }
 
+const _stoppingIds = new Set();
+
 async function stopTuning(id){
-  await api('POST',`/api/miners/${id}/tune/stop`);
-  toast('Tuning stopped','info');
+  _stoppingIds.add(id);
+  // Flip the button immediately so the user sees instant feedback
+  const btn = document.querySelector(`button[onclick="stopTuning(${id})"]`);
+  if(btn){ btn.disabled = true; btn.textContent = '⏹ Stopping…'; }
+  try{
+    await api('POST',`/api/miners/${id}/tune/stop`);
+    toast('Tuning stopped','info');
+  } finally {
+    // Keep _stoppingIds entry until next WS update confirms state change
+  }
 }
 async function stopAllTuning(){
   await api('POST','/api/tune/stop-all');
